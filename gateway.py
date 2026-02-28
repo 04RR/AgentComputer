@@ -29,10 +29,11 @@ from config import load_config
 from agent import AgentRuntime, subscribe_activity, unsubscribe_activity, get_recent_activity
 from session import SessionManager
 from tool_registry import ToolRegistry
-from tools import register_builtin_tools, register_task_tool
+from tools import register_builtin_tools, register_task_tool, register_memory_search_tool
 from cron import CronScheduler
 from reflection import ReflectionEngine
 from skill_loader import load_skills
+from memory_search import MemorySearch
 
 # ─── Logging ───
 logging.basicConfig(
@@ -63,11 +64,25 @@ if skill_names:
 
 logger.info(f"Registered {len(tool_registry.list_tools())} tools")
 
+# Memory search
+memory_search = None
+if config.memory.enabled:
+    memory_search = MemorySearch(
+        workspace=config.agent.workspace,
+        embedding_base_url=config.memory.embedding_base_url,
+        embedding_model=config.memory.embedding_model,
+        top_k=config.memory.top_k,
+    )
+    logger.info(f"Memory search initialized (model: {config.memory.embedding_model})")
+
+# Register memory_search tool (works even if memory_search is None — returns helpful message)
+register_memory_search_tool(tool_registry, memory_search, config.agent.workspace)
+
 # Session manager
 session_mgr = SessionManager(config.sessions.directory)
 
 # Agent runtime
-agent = AgentRuntime(config, tool_registry)
+agent = AgentRuntime(config, tool_registry, memory_search=memory_search)
 
 # Cron scheduler
 scheduler = CronScheduler(config.agent.workspace, agent, session_mgr)
@@ -79,6 +94,8 @@ scheduler.load_jobs()
 async def lifespan(app: FastAPI):
     """Startup and shutdown lifecycle."""
     scheduler.start()
+    if memory_search:
+        asyncio.create_task(memory_search.async_index_all())
     if config.reflection.enabled:
         asyncio.create_task(_run_reflection())
     yield
@@ -99,6 +116,7 @@ async def _run_reflection():
             model_id=model_id,
             max_tokens=config.reflection.max_tokens,
             provider=config.agent.model.provider,
+            memory_search=memory_search,
         )
 
         # Scan for all session JSONL files

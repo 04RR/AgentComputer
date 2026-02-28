@@ -14,7 +14,9 @@
       "WebFetch(domain:api.github.com)",
       "Bash(pip install:*)",
       "Bash(grep:*)",
-      "Bash(echo exit: $?:*)"
+      "Bash(echo exit: $?:*)",
+      "Bash(git:*)",
+      "mcp__ide__getDiagnostics"
     ]
   }
 }

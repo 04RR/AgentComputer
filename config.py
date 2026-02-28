@@ -22,7 +22,7 @@ class LMStudioConfig:
 @dataclass
 class ToolsConfig:
     allow: list[str] = field(default_factory=lambda: [
-        "shell", "read_file", "write_file", "list_directory", "web_fetch", "manage_tasks"
+        "shell", "read_file", "write_file", "list_directory", "web_fetch", "manage_tasks", "memory_search"
     ])
     require_approval: list[str] = field(default_factory=lambda: ["shell"])
 
@@ -40,6 +40,14 @@ class ReflectionConfig:
     model_id: str = ""  # empty = use agent's model
     max_tokens: int = 4096
     max_sessions_per_startup: int = 10
+
+
+@dataclass
+class MemoryConfig:
+    enabled: bool = True
+    embedding_base_url: str = "http://10.5.0.2:1234/v1"
+    embedding_model: str = "text-embedding-nomic-embed-text-v1.5"
+    top_k: int = 5
 
 
 @dataclass
@@ -72,6 +80,7 @@ class Config:
     sessions: SessionsConfig = field(default_factory=SessionsConfig)
     lmstudio: LMStudioConfig = field(default_factory=LMStudioConfig)
     reflection: ReflectionConfig = field(default_factory=ReflectionConfig)
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
 
 
 def load_config(path: str = "config.json") -> Config:
@@ -129,6 +138,13 @@ def load_config(path: str = "config.json") -> Config:
             config.reflection.model_id = r.get("model_id", config.reflection.model_id)
             config.reflection.max_tokens = r.get("max_tokens", config.reflection.max_tokens)
             config.reflection.max_sessions_per_startup = r.get("max_sessions_per_startup", config.reflection.max_sessions_per_startup)
+
+        if "memory" in raw:
+            mem = raw["memory"]
+            config.memory.enabled = mem.get("enabled", config.memory.enabled)
+            config.memory.embedding_base_url = mem.get("embedding_base_url", config.memory.embedding_base_url)
+            config.memory.embedding_model = mem.get("embedding_model", config.memory.embedding_model)
+            config.memory.top_k = mem.get("top_k", config.memory.top_k)
 
     config.agent.workspace = str(Path(config.agent.workspace).resolve())
     Path(config.sessions.directory).mkdir(parents=True, exist_ok=True)
