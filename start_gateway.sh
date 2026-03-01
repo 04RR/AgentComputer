@@ -1,0 +1,2 @@
+export OPENROUTER_API_KEY=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
+python gateway.py

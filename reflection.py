@@ -61,12 +61,13 @@ If nothing useful was found, return empty arrays.
 class ReflectionEngine:
     """Processes sessions to extract cross-session memory."""
 
-    def __init__(self, workspace: str, client: AsyncOpenAI, model_id: str, max_tokens: int = 4096, provider: str = ""):
+    def __init__(self, workspace: str, client: AsyncOpenAI, model_id: str, max_tokens: int = 4096, provider: str = "", memory_search=None):
         self.workspace = Path(workspace)
         self.client = client
         self.model_id = model_id
         self.max_tokens = max_tokens
         self.provider = provider
+        self.memory_search = memory_search
         self.memory_dir = self.workspace / "memory"
         self.memory_dir.mkdir(parents=True, exist_ok=True)
         self.index_path = self.memory_dir / "index.json"
@@ -120,6 +121,10 @@ class ReflectionEngine:
         if result.get("skills"):
             self._save_skills(result["skills"], session_id)
             skills_count = len(result["skills"])
+
+        # Index new entries in memory search for immediate availability
+        if self.memory_search:
+            await self._index_extracted(result, session_id)
 
         entry = {
             "session_id": session_id,
@@ -233,6 +238,39 @@ class ReflectionEngine:
             result = {"session_summary": "Parse error", "knowledge": [], "learnings": [], "skills": []}
 
         return result, tokens_used
+
+    # ── Memory search indexing ──
+
+    async def _index_extracted(self, result: dict, session_id: str) -> None:
+        """Index newly extracted knowledge/learnings/summary in MemorySearch."""
+        for item in result.get("knowledge", []):
+            topic = item.get("topic", "Unknown")
+            content = item.get("content", "")
+            slug = re.sub(r"[\s-]+", "_", re.sub(r"[^a-z0-9\s-]", "", topic.lower().strip()))[:80]
+            sid = slug or f"knowledge_{session_id}"
+            try:
+                await self.memory_search.async_index_text("knowledge", sid, topic, content)
+            except Exception as e:
+                logger.warning(f"Failed to index knowledge '{topic}': {e}")
+
+        for item in result.get("learnings", []):
+            title = item.get("title", "Untitled")
+            content = f"Mistake: {item.get('mistake', '')} Correction: {item.get('correction', '')}"
+            slug = re.sub(r"[\s-]+", "_", re.sub(r"[^a-z0-9\s-]", "", title.lower().strip()))[:80]
+            sid = slug or f"learning_{session_id}"
+            try:
+                await self.memory_search.async_index_text("learning", sid, title, content)
+            except Exception as e:
+                logger.warning(f"Failed to index learning '{title}': {e}")
+
+        summary = result.get("session_summary", "")
+        if summary:
+            try:
+                await self.memory_search.async_index_text(
+                    "session_summary", session_id, f"Session: {session_id}", summary
+                )
+            except Exception as e:
+                logger.warning(f"Failed to index session summary: {e}")
 
     # ── Storage methods ──
 

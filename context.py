@@ -1,7 +1,7 @@
 """Context assembly for agent_computer.
 
-Reads workspace markdown files and assembles the system prompt,
-mirroring OpenClaw's pattern of SOUL.md + USER.md + tool descriptions.
+build_system_prompt is a pure function — all file I/O happens in the caller.
+load_static_context reads workspace files once per run for caching.
 """
 
 from __future__ import annotations
@@ -10,11 +10,6 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 logger = logging.getLogger("agent_computer.context")
-
-# Files loaded into the system prompt (in order)
-CONTEXT_FILES = [
-    ("SOUL.md", "Agent Identity & Rules"),
-]
 
 DEEP_WORK_INSTRUCTIONS = """
 ## Deep Work Mode — MANDATORY WORKFLOW
@@ -81,58 +76,25 @@ manage_tasks(action="create", title="Research missing data for first 3 tickers")
 """
 
 
-def build_system_prompt(
-    workspace: str,
-    agent_name: str,
-    mode: str = "bounded",
-    task_summary: str = "",
-    budget_warning: str = "",
-    pending_task_count: int = 0,
-    context_file: str = "",
-) -> str:
-    """Assemble the system prompt from workspace files.
+def load_static_context(workspace: str) -> dict:
+    """Read static workspace files once per run. Returns dict to unpack into build_system_prompt.
 
-    Order:
-    1. Base instructions (who the agent is, current date)
-    2. SOUL.md — personality, rules, boundaries
-    3. Deep work instructions (if mode == "deep_work")
-    4. Current tasks block (if non-empty)
-    5. Budget warning (if approaching limits)
+    Keys: soul_content, user_content, static_memory_fallback
     """
-    parts: list[str] = []
-
-    # ── Base prompt ──
-    now = datetime.now(timezone.utc).strftime("%A, %B %d, %Y %H:%M UTC")
-    parts.append(f"""You are {agent_name}, a personal AI assistant powered by agent_computer.
-Current date/time: {now}
-Workspace directory: {workspace}
-
-You are an autonomous agent running in an agentic loop. You can use tools to accomplish tasks.
-When you need to take action, use the tools available to you. You may call multiple tools in
-sequence to complete complex tasks. Think step-by-step.
-
-Important rules:
-- Always confirm before destructive operations (deleting files, overwriting data)
-- If a tool call fails, try an alternative approach rather than giving up
-- Be concise in responses unless the user asks for detail
-- If you're unsure, say so rather than guessing
-
-Communication style: concise""")
-
-    # ── Workspace context files ──
     workspace_path = Path(workspace)
-    for filename, label in CONTEXT_FILES:
-        file_path = workspace_path / filename
-        if file_path.exists():
-            content = file_path.read_text().strip()
-            if content:
-                parts.append(f"<{label.lower().replace(' ', '_')}>\n{content}\n</{label.lower().replace(' ', '_')}>")
-                logger.debug(f"Loaded context: {filename} ({len(content)} chars)")
-        else:
-            logger.debug(f"Context file not found (skipping): {filename}")
+    result = {"soul_content": "", "user_content": "", "static_memory_fallback": ""}
 
-    # ── Memory / learnings ──
+    for fname, key in [("SOUL.md", "soul_content"), ("USER.md", "user_content")]:
+        path = workspace_path / fname
+        if path.exists():
+            content = path.read_text(encoding="utf-8").strip()
+            if content:
+                result[key] = content
+                logger.debug(f"Loaded {fname} ({len(content)} chars)")
+
+    # Static memory fallback (used when MemorySearch is unavailable)
     memory_dir = workspace_path / "memory"
+    parts = []
     for filename, label in [("knowledge.md", "Agent Knowledge"), ("learnings.md", "Agent Learnings")]:
         file_path = memory_dir / filename
         if file_path.exists():
@@ -142,11 +104,97 @@ Communication style: concise""")
                     content = content[:2000] + "\n...[use read_file for full content]"
                 tag = label.lower().replace(" ", "_")
                 parts.append(f"<{tag}>\n{content}\n</{tag}>")
+    result["static_memory_fallback"] = "\n\n".join(parts)
 
-    # ── Deep work mode additions ──
+    return result
+
+
+def build_system_prompt(
+    workspace: str,
+    agent_name: str,
+    mode: str = "bounded",
+    task_summary: str = "",
+    budget_warning: str = "",
+    pending_task_count: int = 0,
+    context_file: str = "",
+    relevant_memories: list[dict] | None = None,
+    user_message: str = "",
+    tool_names: list[str] | None = None,
+    session_summary: str = "",
+    soul_content: str = "",
+    user_content: str = "",
+    static_memory_fallback: str = "",
+) -> str:
+    """Assemble the system prompt. Pure function — no file I/O.
+
+    Assembly order:
+    1. Base identity
+    2. SOUL.md content
+    3. USER.md content
+    4. Tool inventory
+    5. Relevant memories (or static fallback)
+    6. Session context
+    7. Deep work instructions (if deep_work mode)
+    8. Task state
+    9. Budget warning
+    10. Archived context
+    """
+    parts: list[str] = []
+
+    # 1. Base identity (lean — detailed rules belong in SOUL.md)
+    now = datetime.now(timezone.utc).strftime("%A, %B %d, %Y %H:%M UTC")
+    parts.append(f"""You are {agent_name}, a personal AI assistant powered by agent_computer.
+Current date/time: {now}
+Workspace directory: {workspace}
+
+You are an autonomous agent running in an agentic loop with tool access.
+Think step-by-step. Be concise. If a tool call fails, try an alternative approach.""")
+
+    # 2. SOUL.md — personality, rules, boundaries
+    if soul_content:
+        parts.append(f"<agent_identity_&_rules>\n{soul_content}\n</agent_identity_&_rules>")
+
+    # 3. USER.md — user context, preferences, project info
+    if user_content:
+        parts.append(f"<user_context>\n{user_content}\n</user_context>")
+
+    # 4. Tool inventory — natural language summary of capabilities
+    if tool_names:
+        tool_list = ", ".join(tool_names)
+        parts.append(
+            f"<available_tools>\nYou have these tools: {tool_list}\n"
+            "Use the appropriate tool for each task. If a tool call fails, try an alternative.\n"
+            "</available_tools>"
+        )
+
+    # 5. Relevant memories (query-aware) or static fallback
+    if relevant_memories:
+        mem_lines = []
+        for m in relevant_memories:
+            content = m.get("content", "")
+            if len(content) > 500:
+                content = content[:500] + "..."
+            mem_lines.append(
+                f"- [{m.get('source_type', '?')}] **{m.get('title', 'Untitled')}**: {content}"
+            )
+        parts.append(
+            "<relevant_memories>\n"
+            "The following memories may be relevant:\n"
+            + "\n".join(mem_lines)
+            + "\n</relevant_memories>"
+        )
+    elif static_memory_fallback:
+        parts.append(static_memory_fallback)
+
+    # 6. Session context — helps maintain coherence in long conversations
+    if session_summary:
+        parts.append(f"<session_context>\nThis session so far: {session_summary}\n</session_context>")
+
+    # 7. Deep work instructions (unchanged)
     if mode == "deep_work":
         parts.append(DEEP_WORK_INSTRUCTIONS)
 
+        # 8. Task state
         if task_summary:
             resume_hint = ""
             if pending_task_count > 0:
@@ -156,9 +204,11 @@ Communication style: concise""")
                 )
             parts.append(f"<current_tasks>\n{task_summary}{resume_hint}\n</current_tasks>")
 
+        # 9. Budget warning
         if budget_warning:
             parts.append(f"<budget_warning>\n{budget_warning}\n</budget_warning>")
 
+        # 10. Archived context
         if context_file:
             parts.append(
                 f"<archived_context>\n"

@@ -133,6 +133,55 @@ def register_builtin_tools(registry: ToolRegistry, workspace: str) -> None:
     ))
 
 
+def register_memory_search_tool(registry: ToolRegistry, memory_search_instance, workspace: str) -> None:
+    """Register the memory_search tool. Captures MemorySearch instance via closure."""
+
+    async def search_memory(query: str, top_k: int = 5) -> str:
+        """Search long-term memory for relevant past knowledge and learnings."""
+        if memory_search_instance is None:
+            return "Memory search is not enabled. Enable it in config.json under the memory section."
+
+        top_k = max(1, min(top_k, 20))
+
+        try:
+            results = memory_search_instance.search(query, top_k=top_k)
+        except Exception:
+            # MemorySearch failed — fall back to keyword scan
+            results = None
+
+        if results is None:
+            return _keyword_fallback(query, workspace)
+
+        if not results:
+            return "No relevant memories found."
+
+        lines = [f"Found {len(results)} relevant memories:\n"]
+        for i, r in enumerate(results, 1):
+            content = r.content
+            if len(content) > 600:
+                content = content[:600] + "..."
+            lines.append(f"--- Result {i} (score: {r.score}) ---")
+            lines.append(f"Type: {r.source_type} | Title: {r.title}")
+            lines.append(content)
+            lines.append("")
+        return "\n".join(lines)
+
+    registry.register(Tool(
+        name="memory_search",
+        description=(
+            "Search your long-term memory (past session knowledge, learnings, and summaries) "
+            "for relevant information. Use this when you need to recall past work, look up "
+            "previously discovered facts, API patterns, mistakes learned from, or context "
+            "from earlier sessions. Returns the most relevant memory entries ranked by relevance."
+        ),
+        params=[
+            ToolParam("query", "string", "Natural language search query describing what you want to find"),
+            ToolParam("top_k", "integer", "Number of results to return (default 5, max 20)", required=False),
+        ],
+        handler=search_memory,
+    ))
+
+
 def register_task_tool(registry: ToolRegistry) -> None:
     """Register the manage_tasks tool for deep work mode."""
 
@@ -251,3 +300,37 @@ def _human_size(size: int) -> str:
             return f"{size:.0f}{unit}"
         size /= 1024  # type: ignore
     return f"{size:.1f}TB"
+
+
+def _keyword_fallback(query: str, workspace: str) -> str:
+    """Simple keyword scan of knowledge.md and learnings.md when MemorySearch fails."""
+    memory_dir = Path(workspace) / "memory"
+    terms = [t for t in query.lower().split() if len(t) > 2]
+    if not terms:
+        return "No relevant memories found."
+
+    matches: list[tuple[int, str, str, str]] = []
+    for fname in ("knowledge.md", "learnings.md"):
+        path = memory_dir / fname
+        if not path.exists():
+            continue
+        sections = path.read_text(encoding="utf-8").split("\n## ")
+        for section in sections[1:]:
+            parts = section.split("\n", 1)
+            title = parts[0].strip()
+            body = parts[1].strip() if len(parts) > 1 else ""
+            full = (title + " " + body).lower()
+            score = sum(1 for t in terms if t in full)
+            if score > 0:
+                matches.append((score, title, body[:400], fname))
+
+    if not matches:
+        return "No relevant memories found."
+
+    matches.sort(reverse=True)
+    lines = [f"Found {len(matches)} matching memories (keyword scan):\n"]
+    for score, title, body, source in matches[:10]:
+        lines.append(f"--- [{source}] {title} ---")
+        lines.append(body)
+        lines.append("")
+    return "\n".join(lines)

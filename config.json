@@ -9,9 +9,9 @@
     "workspace": "./workspace",
     "model": {
       "provider": "lmstudio",
-      "model_id": "qwen/qwen3.5-35b-a3b",
+      "model_id": "mistralai/ministral-3-14b-reasoning",
       "base_url": "http://10.5.0.2:1234/v1",
-      "max_tokens": 4096
+      "max_tokens": 8192
     },
     "tools": {
       "allow": [
@@ -22,7 +22,8 @@
         "web_fetch",
         "web_fetch_js",
         "web_fetch_stealth",
-        "manage_tasks"
+        "manage_tasks",
+        "memory_search"
       ],
       "require_approval": [
         "shell"
@@ -44,5 +45,11 @@
     "model_id": "",
     "max_tokens": 4096,
     "max_sessions_per_startup": 10
+  },
+  "memory": {
+    "enabled": true,
+    "embedding_base_url": "http://10.5.0.2:1234/v1",
+    "embedding_model": "text-embedding-granite-embedding-125m-english",
+    "top_k": 5
   }
 }

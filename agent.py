@@ -20,7 +20,7 @@ from typing import Any, AsyncIterator
 from openai import AsyncOpenAI
 
 from config import Config
-from context import build_system_prompt
+from context import build_system_prompt, load_static_context
 from session import Session
 from tool_registry import ToolRegistry
 from tools import set_current_task_store
@@ -75,10 +75,11 @@ class AgentRuntime:
     Llama, DeepSeek, etc.) just by changing the model_id in config.
     """
 
-    def __init__(self, config: Config, tool_registry: ToolRegistry):
+    def __init__(self, config: Config, tool_registry: ToolRegistry, memory_search=None):
         self.config = config
         self.agent_config = config.agent
         self.tools = tool_registry
+        self.memory_search = memory_search
         self._openrouter_api_key: str | None = None
 
         # OpenAI SDK pointed at OpenRouter
@@ -145,7 +146,27 @@ class AgentRuntime:
                 allowed_tools.remove("manage_tasks")
             tool_schemas = self.tools.get_openai_tools(allowed=allowed_tools)
 
-            # 5. Build initial system prompt
+            # 5. Cache static context (read files once per run, not every iteration)
+            static_ctx = load_static_context(self.agent_config.workspace)
+            tool_name_list = [t.name for t in self.tools.list_tools() if t.name in allowed_tools]
+
+            # 6. Search relevant memories for this user message (once per run)
+            relevant_memories = None
+            if self.memory_search:
+                try:
+                    results = await self.memory_search.async_search(user_message)
+                    if results:
+                        relevant_memories = [
+                            {"source_type": r.source_type, "source_id": r.source_id,
+                             "title": r.title, "content": r.content, "score": r.score}
+                            for r in results
+                        ]
+                except Exception as e:
+                    logger.warning(f"Memory search failed: {e}")
+
+            session_summary = ""
+
+            # 7. Build initial system prompt
             task_summary = session.task_store.summary() if is_deep_work else ""
             pending_task_count = sum(
                 1 for t in session.task_store.list_all()
@@ -157,7 +178,12 @@ class AgentRuntime:
                 mode=effective_mode,
                 task_summary=task_summary,
                 pending_task_count=pending_task_count,
-                context_file="",  # No context file initially
+                context_file="",
+                relevant_memories=relevant_memories,
+                user_message=user_message,
+                tool_names=tool_name_list,
+                session_summary=session_summary,
+                **static_ctx,
             )
 
             # 6. Run the agentic loop
@@ -192,6 +218,11 @@ class AgentRuntime:
                                 f"{remaining:,} tokens remaining. "
                                 f"Wrap up your work soon — prioritize completing critical tasks."
                             )
+                    # Update session summary every 10 iterations from completed tasks
+                    if iteration % 10 == 0:
+                        completed = [t for t in session.task_store.list_all() if t.status == "completed"]
+                        if completed:
+                            session_summary = "Completed: " + "; ".join(t.title for t in completed[:20])
                     system_prompt = build_system_prompt(
                         self.agent_config.workspace,
                         self.agent_config.name,
@@ -200,6 +231,11 @@ class AgentRuntime:
                         budget_warning=budget_warning,
                         pending_task_count=pending_task_count,
                         context_file=context_file,
+                        relevant_memories=relevant_memories,
+                        user_message=user_message,
+                        tool_names=tool_name_list,
+                        session_summary=session_summary,
+                        **static_ctx,
                     )
 
                 # Emit thinking event (enhanced in deep-work mode)
@@ -248,6 +284,11 @@ class AgentRuntime:
                         task_summary=task_summary,
                         pending_task_count=pending_task_count,
                         context_file=context_file,
+                        relevant_memories=relevant_memories,
+                        user_message=user_message,
+                        tool_names=tool_name_list,
+                        session_summary=session_summary,
+                        **static_ctx,
                     )
 
                 # Token budget enforcement (hard stop — safety net after compaction cap)

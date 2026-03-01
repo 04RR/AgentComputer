@@ -27,3 +27,5 @@ sessions/
 workspace/
 *.jsonl
 .env
+
+config.json
