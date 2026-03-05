@@ -49,10 +49,14 @@ logger.info(f"Loaded config: agent={config.agent.name}, model={config.agent.mode
 
 # Tool registry
 tool_registry = ToolRegistry()
-register_builtin_tools(tool_registry, config.agent.workspace)
-register_task_tool(tool_registry)
+allowed_tools = config.agent.tools.allow
+register_builtin_tools(tool_registry, config.agent.workspace, allowed=allowed_tools, tools_config=config.agent.tools)
+register_task_tool(tool_registry, allowed=allowed_tools)
 from tools.web_scrapling import register_scrapling_tools
-register_scrapling_tools(tool_registry, config.agent.workspace)
+register_scrapling_tools(tool_registry, config.agent.workspace, allowed=allowed_tools)
+if config.pinchtab.enabled:
+    from tools.pinchtab import register_pinchtab_tools
+    register_pinchtab_tools(tool_registry, config.agent.workspace, allowed=allowed_tools, pinchtab_config=config.pinchtab)
 tool_registry.set_approval_requirements(config.agent.tools.require_approval)
 
 # Load existing skills into registry
@@ -76,7 +80,7 @@ if config.memory.enabled:
     logger.info(f"Memory search initialized (model: {config.memory.embedding_model})")
 
 # Register memory_search tool (works even if memory_search is None — returns helpful message)
-register_memory_search_tool(tool_registry, memory_search, config.agent.workspace)
+register_memory_search_tool(tool_registry, memory_search, config.agent.workspace, allowed=allowed_tools)
 
 # Session manager
 session_mgr = SessionManager(config.sessions.directory)
@@ -88,6 +92,9 @@ agent = AgentRuntime(config, tool_registry, memory_search=memory_search)
 scheduler = CronScheduler(config.agent.workspace, agent, session_mgr)
 scheduler.load_jobs()
 
+# Signals that the server has finished initializing
+server_ready = asyncio.Event()
+
 # ─── FastAPI App ───
 
 @asynccontextmanager
@@ -98,6 +105,13 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(memory_search.async_index_all())
     if config.reflection.enabled:
         asyncio.create_task(_run_reflection())
+    if config.pinchtab.enabled:
+        asyncio.create_task(_check_pinchtab())
+    server_ready.set()
+    # Pre-warm the OpenRouter model cache if an API key is available
+    or_api_key = agent._openrouter_api_key or os.environ.get("OPENROUTER_API_KEY", "")
+    if config.agent.model.provider == "openrouter" and or_api_key:
+        asyncio.create_task(get_openrouter_models(or_api_key))
     yield
     await scheduler.stop()
 
@@ -106,7 +120,7 @@ app = FastAPI(title="agent_computer Gateway", version="0.1.0", lifespan=lifespan
 
 async def _run_reflection():
     """Background task: process unprocessed sessions to extract memory."""
-    await asyncio.sleep(2)  # Let server finish starting
+    await server_ready.wait()  # Wait for server initialization to complete
 
     try:
         model_id = config.reflection.model_id or config.agent.model.model_id
@@ -154,6 +168,22 @@ async def _run_reflection():
 
     except Exception as e:
         logger.error(f"Auto-reflection failed: {e}")
+
+
+async def _check_pinchtab():
+    """Check PinchTab connectivity at startup."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            headers = {}
+            if config.pinchtab.token:
+                headers["Authorization"] = f"Bearer {config.pinchtab.token}"
+            resp = await client.get(f"{config.pinchtab.base_url}/health", headers=headers)
+            if resp.status_code == 200:
+                logger.info(f"PinchTab connected: {config.pinchtab.base_url}")
+            else:
+                logger.warning(f"PinchTab returned {resp.status_code} — browser tools may not work")
+    except Exception as e:
+        logger.warning(f"PinchTab not reachable at {config.pinchtab.base_url}: {e}")
 
 
 def _load_session_messages(jsonl_path: Path) -> list[dict]:
@@ -357,42 +387,87 @@ async def status():
             "token_budget": config.agent.deep_work.token_budget,
             "warning_threshold": config.agent.deep_work.warning_threshold,
         },
+        "pinchtab": {
+            "enabled": config.pinchtab.enabled,
+            "base_url": config.pinchtab.base_url,
+        },
     })
 
 
 # ─── Models API ───
 
-# Curated list of popular OpenRouter models
-OPENROUTER_MODELS = [
+# Fallback used only when the OpenRouter API fetch fails and the cache is empty
+_OPENROUTER_FALLBACK_MODELS = [
     {"id": "anthropic/claude-sonnet-4-6", "name": "Claude Sonnet 4.6"},
     {"id": "anthropic/claude-opus-4-6", "name": "Claude Opus 4.6"},
-    {"id": "anthropic/claude-haiku-4-5-20251001", "name": "Claude Haiku 4.5"},
     {"id": "openai/gpt-4o", "name": "GPT-4o"},
-    {"id": "openai/gpt-4.1", "name": "GPT-4.1"},
-    {"id": "openai/o3-mini", "name": "o3-mini"},
     {"id": "google/gemini-2.5-pro-preview", "name": "Gemini 2.5 Pro"},
-    {"id": "google/gemini-2.5-flash-preview", "name": "Gemini 2.5 Flash"},
-    {"id": "deepseek/deepseek-r1", "name": "DeepSeek R1"},
     {"id": "deepseek/deepseek-chat", "name": "DeepSeek V3"},
-    {"id": "meta-llama/llama-4-maverick", "name": "Llama 4 Maverick"},
-    {"id": "meta-llama/llama-4-scout", "name": "Llama 4 Scout"},
-    {"id": "qwen/qwen3-235b-a22b", "name": "Qwen3 235B"},
 ]
+
+# Dynamic cache for OpenRouter models
+_openrouter_models_cache: list[dict] = []
+_openrouter_models_fetched_at: float = 0.0
+
+
+async def fetch_openrouter_models(api_key: str) -> list[dict]:
+    """Fetch the full model list from the OpenRouter API. Returns [] on failure."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://openrouter.ai/api/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            models = [
+                {"id": m["id"], "name": m.get("name") or m["id"]}
+                for m in data.get("data", [])
+            ]
+            models.sort(key=lambda m: m["name"])
+            logger.info(f"Fetched {len(models)} models from OpenRouter API")
+            return models
+    except Exception as e:
+        logger.warning(f"Failed to fetch OpenRouter models: {e}")
+        return []
+
+
+async def get_openrouter_models(api_key: str, max_age_seconds: int = 3600) -> list[dict]:
+    """Return cached OpenRouter models, refreshing if stale or empty."""
+    global _openrouter_models_cache, _openrouter_models_fetched_at
+    if _openrouter_models_cache and time.time() - _openrouter_models_fetched_at < max_age_seconds:
+        return _openrouter_models_cache
+
+    models = await fetch_openrouter_models(api_key)
+    if models:
+        _openrouter_models_cache = models
+        _openrouter_models_fetched_at = time.time()
+        return models
+
+    # Fetch failed — return existing cache if available, otherwise fallback
+    if _openrouter_models_cache:
+        return _openrouter_models_cache
+    return list(_OPENROUTER_FALLBACK_MODELS)
 
 
 @app.get("/api/models")
 async def list_models():
     """List available models from all providers."""
+    api_key = agent._openrouter_api_key or os.environ.get("OPENROUTER_API_KEY", "")
+
+    if api_key:
+        openrouter_models = await get_openrouter_models(api_key)
+        openrouter_info: dict = {"name": "OpenRouter", "models": openrouter_models}
+    else:
+        openrouter_info = {"name": "OpenRouter", "models": [], "note": "OPENROUTER_API_KEY not set"}
+
     result = {
         "current": {
             "provider": config.agent.model.provider,
             "model_id": config.agent.model.model_id,
         },
         "providers": {
-            "openrouter": {
-                "name": "OpenRouter",
-                "models": OPENROUTER_MODELS,
-            },
+            "openrouter": openrouter_info,
             "lmstudio": {
                 "name": "LM Studio",
                 "models": [],
@@ -440,6 +515,11 @@ async def select_model(body: dict):
         raise HTTPException(400, f"Unknown provider: {provider}")
 
     agent.set_model(provider, model_id, base_url, api_key)
+
+    # Log if the selected model is not in the cached list
+    cached_ids = {m["id"] for m in _openrouter_models_cache}
+    if provider == "openrouter" and model_id not in cached_ids:
+        logger.info(f"Model {model_id} not in cached model list (custom or stale cache)")
 
     logger.info(f"Model switched to {model_id} ({provider})")
     return JSONResponse({

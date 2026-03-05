@@ -28,8 +28,8 @@ def _extract_response(response, css_selector: str | None, max_chars: int) -> str
     })
 
 
-def register_scrapling_tools(registry: ToolRegistry, workspace: str) -> None:
-    """Register all Scrapling-based web fetching tools."""
+def register_scrapling_tools(registry: ToolRegistry, workspace: str, allowed: list[str] | None = None) -> None:
+    """Register all Scrapling-based web fetching tools. If allowed is given, only register tools in the list."""
 
     # ─── web_fetch (AsyncFetcher) ───
 
@@ -47,16 +47,17 @@ def register_scrapling_tools(registry: ToolRegistry, workspace: str) -> None:
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    registry.register(Tool(
-        name="web_fetch",
-        description="Fetch a URL via HTTP with browser TLS impersonation. Fast, no JS rendering. Use for APIs, static pages, file downloads.",
-        params=[
-            ToolParam("url", "string", "The URL to fetch"),
-            ToolParam("css_selector", "string", "CSS selector to extract specific elements", required=False),
-            ToolParam("max_chars", "integer", "Max characters to return (default 10000)", required=False),
-        ],
-        handler=web_fetch,
-    ))
+    if allowed is None or "web_fetch" in allowed:
+        registry.register(Tool(
+            name="web_fetch",
+            description="Fetch a URL via HTTP with browser TLS impersonation. Fast, no JS rendering. Best for reading pages, fetching data, API calls. For interactive tasks (clicking, filling forms, multi-step workflows), use the browser_* tools instead.",
+            params=[
+                ToolParam("url", "string", "The URL to fetch"),
+                ToolParam("css_selector", "string", "CSS selector to extract specific elements", required=False),
+                ToolParam("max_chars", "integer", "Max characters to return (default 10000)", required=False),
+            ],
+            handler=web_fetch,
+        ))
 
     # ─── web_fetch_js (DynamicFetcher) ───
 
@@ -75,17 +76,18 @@ def register_scrapling_tools(registry: ToolRegistry, workspace: str) -> None:
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    registry.register(Tool(
-        name="web_fetch_js",
-        description="Fetch a URL with a full browser for JS rendering. Use for dynamic sites (Reddit, YouTube, Google). Slower but renders JS content.",
-        params=[
-            ToolParam("url", "string", "The URL to fetch"),
-            ToolParam("css_selector", "string", "CSS selector to extract specific elements", required=False),
-            ToolParam("wait_seconds", "integer", "Seconds to wait for JS to render (default 3)", required=False),
-            ToolParam("max_chars", "integer", "Max characters to return (default 10000)", required=False),
-        ],
-        handler=web_fetch_js,
-    ))
+    if allowed is None or "web_fetch_js" in allowed:
+        registry.register(Tool(
+            name="web_fetch_js",
+            description="Fetch a URL with a full browser for JS rendering. Use for dynamic sites (Reddit, YouTube, Google). Slower but renders JS content.",
+            params=[
+                ToolParam("url", "string", "The URL to fetch"),
+                ToolParam("css_selector", "string", "CSS selector to extract specific elements", required=False),
+                ToolParam("wait_seconds", "integer", "Seconds to wait for JS to render (default 3)", required=False),
+                ToolParam("max_chars", "integer", "Max characters to return (default 10000)", required=False),
+            ],
+            handler=web_fetch_js,
+        ))
 
     # ─── web_fetch_stealth (StealthyFetcher) ───
 
@@ -103,13 +105,14 @@ def register_scrapling_tools(registry: ToolRegistry, workspace: str) -> None:
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    registry.register(Tool(
-        name="web_fetch_stealth",
-        description="Fetch a URL with a stealth browser that bypasses Cloudflare and bot detection. Use when other fetchers get blocked.",
-        params=[
-            ToolParam("url", "string", "The URL to fetch"),
-            ToolParam("css_selector", "string", "CSS selector to extract specific elements", required=False),
-            ToolParam("max_chars", "integer", "Max characters to return (default 10000)", required=False),
-        ],
-        handler=web_fetch_stealth,
-    ))
+    if allowed is None or "web_fetch_stealth" in allowed:
+        registry.register(Tool(
+            name="web_fetch_stealth",
+            description="Fetch a URL with a stealth browser that bypasses Cloudflare and bot detection. Use when other fetchers get blocked.",
+            params=[
+                ToolParam("url", "string", "The URL to fetch"),
+                ToolParam("css_selector", "string", "CSS selector to extract specific elements", required=False),
+                ToolParam("max_chars", "integer", "Max characters to return (default 10000)", required=False),
+            ],
+            handler=web_fetch_stealth,
+        ))
