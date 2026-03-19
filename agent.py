@@ -21,6 +21,7 @@ from openai import AsyncOpenAI
 
 from config import Config
 from context import build_system_prompt, build_static_prompt_prefix, build_dynamic_suffix, load_static_context
+from persona import Persona, PersonaStore
 from session import Session
 from tool_registry import ToolRegistry
 
@@ -79,6 +80,8 @@ class AgentRuntime:
         self.agent_config = config.agent
         self.tools = tool_registry
         self.memory_search = memory_search
+        self.persona_store: PersonaStore | None = None
+        self.cron_scheduler = None
         self._openrouter_api_key: str | None = None
 
         # OpenAI-compatible client — key depends on provider
@@ -114,11 +117,73 @@ class AgentRuntime:
         )
         logger.info(f"Model switched: {model_id} via {provider} ({base_url})")
 
-    async def run(self, session: Session, user_message: str, mode: str | None = None) -> AsyncIterator[AgentEvent]:
+    async def run(self, session: Session, user_message: str, mode: str | None = None,
+                   persona: Persona | None = None, memory_search_override=None) -> AsyncIterator[AgentEvent]:
         """Run the full agentic loop for a user message.
 
         Yields AgentEvent objects for real-time streaming to the client.
+        When persona is provided, uses the persona's workspace and settings.
         """
+        # Derive effective workspace
+        effective_workspace = persona.workspace_path if persona else self.agent_config.workspace
+
+        # Model override for persona
+        _model_overridden = False
+        _saved_client = None
+        _saved_model_id = None
+        _saved_provider = None
+        _saved_base_url = None
+
+        if persona and persona.model_override:
+            override = persona.model_override
+            if override.startswith("openrouter/"):
+                ov_provider = "openrouter"
+                ov_model_id = override[len("openrouter/"):]
+                ov_base_url = "https://openrouter.ai/api/v1"
+                ov_api_key = self._openrouter_api_key
+            elif override.startswith("lmstudio/"):
+                ov_provider = "lmstudio"
+                ov_model_id = override[len("lmstudio/"):]
+                ov_base_url = self.config.lmstudio.base_url
+                ov_api_key = self.config.lmstudio.api_key
+            else:
+                ov_provider = self.agent_config.model.provider
+                ov_model_id = override
+                ov_base_url = self.agent_config.model.base_url
+                ov_api_key = self.client.api_key
+
+            _model_overridden = True
+            _saved_client = self.client
+            _saved_model_id = self.agent_config.model.model_id
+            _saved_provider = self.agent_config.model.provider
+            _saved_base_url = self.agent_config.model.base_url
+
+            self.agent_config.model.provider = ov_provider
+            self.agent_config.model.model_id = ov_model_id
+            self.agent_config.model.base_url = ov_base_url
+            self.client = AsyncOpenAI(
+                base_url=ov_base_url,
+                api_key=ov_api_key or "placeholder",
+                default_headers={"X-OpenRouter-Title": self.agent_config.name},
+            )
+            logger.info(f"Model override active: {ov_model_id} via {ov_provider}")
+
+        try:
+            async for event in self._run_inner(session, user_message, mode, persona, memory_search_override, effective_workspace):
+                yield event
+        finally:
+            if _model_overridden:
+                self.client = _saved_client
+                self.agent_config.model.model_id = _saved_model_id
+                self.agent_config.model.provider = _saved_provider
+                self.agent_config.model.base_url = _saved_base_url
+                logger.info(f"Model override restored: {_saved_model_id}")
+
+    async def _run_inner(self, session: Session, user_message: str, mode: str | None = None,
+                          persona: Persona | None = None, memory_search_override=None,
+                          effective_workspace: str = "") -> AsyncIterator[AgentEvent]:
+        """Inner run logic, separated to allow model override try/finally wrapper."""
+
         # Resolve mode: explicit param > session mode > default
         effective_mode = mode or session.mode
         is_deep_work = effective_mode == "deep_work"
@@ -154,23 +219,34 @@ class AgentRuntime:
             "task_store": session.task_store if is_deep_work else None,
             "mode": effective_mode,
             "session_id": session.session_id,
+            "workspace": effective_workspace,
+            "memory_search": memory_search_override,
+            "persona_store": self.persona_store,
+            "cron_scheduler": self.cron_scheduler,
         }
 
         # 4. Build tool schemas — filter manage_tasks out in bounded mode
-        allowed_tools = list(self.agent_config.tools.allow)
+        if persona and self.persona_store:
+            allowed_tools = self.persona_store.get_effective_tools(persona, list(self.agent_config.tools.allow))
+        else:
+            allowed_tools = list(self.agent_config.tools.allow)
         if not is_deep_work and "manage_tasks" in allowed_tools:
             allowed_tools.remove("manage_tasks")
         tool_schemas = self.tools.get_openai_tools(allowed=allowed_tools)
 
         # 5. Cache static context (read files once per run, not every iteration)
-        static_ctx = load_static_context(self.agent_config.workspace)
+        static_ctx = load_static_context(
+            effective_workspace,
+            user_md_path=persona.user_md_path if persona else None,
+        )
         tool_name_list = [t.name for t in self.tools.list_tools() if t.name in allowed_tools]
 
         # 6. Search relevant memories for this user message (once per run)
+        effective_memory_search = memory_search_override or self.memory_search
         relevant_memories = None
-        if self.memory_search:
+        if effective_memory_search:
             try:
-                results = await self.memory_search.async_search(user_message)
+                results = await effective_memory_search.async_search(user_message)
                 if results:
                     relevant_memories = [
                         {"source_type": r.source_type, "source_id": r.source_id,
@@ -185,7 +261,7 @@ class AgentRuntime:
         # 7. Build system prompt — cache static prefix for deep work reuse
         if is_deep_work:
             static_prefix = build_static_prompt_prefix(
-                workspace=self.agent_config.workspace,
+                workspace=effective_workspace,
                 agent_name=self.agent_config.name,
                 mode=effective_mode,
                 deep_work_phase=session.deep_work_phase,
@@ -206,7 +282,7 @@ class AgentRuntime:
             task_summary = ""
             pending_task_count = 0
             system_prompt = build_system_prompt(
-                self.agent_config.workspace,
+                effective_workspace,
                 self.agent_config.name,
                 mode=effective_mode,
                 relevant_memories=relevant_memories,
@@ -257,7 +333,7 @@ class AgentRuntime:
                         session_summary = "Completed: " + "; ".join(t.title for t in completed[:20])
                         # Rebuild static prefix with updated session summary
                         static_prefix = build_static_prompt_prefix(
-                            workspace=self.agent_config.workspace,
+                            workspace=effective_workspace,
                             agent_name=self.agent_config.name,
                             mode=effective_mode,
                             deep_work_phase=session.deep_work_phase,
@@ -292,7 +368,7 @@ class AgentRuntime:
                 compaction_count += 1
                 task_summary = session.task_store.summary()
                 context_file = session.compact(
-                    self.agent_config.workspace, task_summary
+                    effective_workspace, task_summary
                 )
                 logger.info(
                     f"Auto-compaction #{compaction_count}: "
@@ -556,10 +632,11 @@ class AgentRuntime:
                 "message": f"Agent loop hit max iterations ({max_iterations}). Stopping.",
             })
 
-    async def run_simple(self, session: Session, user_message: str, mode: str | None = None) -> str:
+    async def run_simple(self, session: Session, user_message: str, mode: str | None = None,
+                          persona: Persona | None = None, memory_search_override=None) -> str:
         """Run the agent loop and return the final text response (non-streaming)."""
         final_text = ""
-        async for event in self.run(session, user_message, mode=mode):
+        async for event in self.run(session, user_message, mode=mode, persona=persona, memory_search_override=memory_search_override):
             if event.type == "done":
                 final_text = event.data.get("text", "")
             elif event.type == "error":

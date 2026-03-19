@@ -31,8 +31,11 @@ def register_builtin_tools(registry: ToolRegistry, workspace: str, allowed: list
 
     # ─── Shell Exec ───
 
-    async def shell_exec(command: str, timeout: int = 30) -> str:
+    async def shell_exec(command: str, timeout: int = 30, _context: dict | None = None) -> str:
         """Execute a shell command and return stdout/stderr."""
+        effective_workspace = (_context or {}).get("workspace", workspace)
+        effective_workspace_resolved = str(Path(effective_workspace).resolve())
+
         # Check against blocked command patterns
         cmd_lower = command.lower()
         for pattern in blocked_commands:
@@ -45,7 +48,7 @@ def register_builtin_tools(registry: ToolRegistry, workspace: str, allowed: list
             abs_paths = re.findall(r'(?:^|\s)(/[a-zA-Z0-9_./-]+)', command)
             for abs_path in abs_paths:
                 resolved = str(Path(abs_path).resolve())
-                if not resolved.startswith(workspace_resolved):
+                if not resolved.startswith(effective_workspace_resolved):
                     return json.dumps({
                         "error": f"Command references absolute path '{abs_path}' outside the workspace. "
                                  f"Set shell_allow_absolute_paths=true in config to override."
@@ -56,7 +59,7 @@ def register_builtin_tools(registry: ToolRegistry, workspace: str, allowed: list
                 command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=workspace,
+                cwd=effective_workspace,
             )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             result = {
@@ -81,10 +84,11 @@ def register_builtin_tools(registry: ToolRegistry, workspace: str, allowed: list
 
     # ─── Read File ───
 
-    async def read_file(path: str, max_lines: int = 500) -> str:
+    async def read_file(path: str, max_lines: int = 500, _context: dict | None = None) -> str:
         """Read a file and return its contents."""
+        effective_workspace = (_context or {}).get("workspace", workspace)
         try:
-            file_path = _resolve_path(path, workspace)
+            file_path = _resolve_path(path, effective_workspace)
         except PathTraversalError as e:
             return json.dumps({"error": str(e)})
         try:
@@ -109,10 +113,11 @@ def register_builtin_tools(registry: ToolRegistry, workspace: str, allowed: list
 
     # ─── Write File ───
 
-    async def write_file(path: str, content: str, mode: str = "overwrite") -> str:
+    async def write_file(path: str, content: str, mode: str = "overwrite", _context: dict | None = None) -> str:
         """Write content to a file."""
+        effective_workspace = (_context or {}).get("workspace", workspace)
         try:
-            file_path = _resolve_path(path, workspace)
+            file_path = _resolve_path(path, effective_workspace)
         except PathTraversalError as e:
             return json.dumps({"error": str(e)})
         try:
@@ -140,10 +145,11 @@ def register_builtin_tools(registry: ToolRegistry, workspace: str, allowed: list
 
     # ─── List Directory ───
 
-    async def list_directory(path: str = ".", max_depth: int = 2) -> str:
+    async def list_directory(path: str = ".", max_depth: int = 2, _context: dict | None = None) -> str:
         """List directory contents."""
+        effective_workspace = (_context or {}).get("workspace", workspace)
         try:
-            dir_path = _resolve_path(path, workspace)
+            dir_path = _resolve_path(path, effective_workspace)
         except PathTraversalError as e:
             return json.dumps({"error": str(e)})
         try:
@@ -174,9 +180,13 @@ def register_memory_search_tool(registry: ToolRegistry, memory_search_instance, 
     if not _is_allowed("memory_search", allowed):
         return
 
-    async def search_memory(query: str, top_k: int = 5) -> str:
+    async def search_memory(query: str, top_k: int = 5, _context: dict | None = None) -> str:
         """Search long-term memory for relevant past knowledge and learnings."""
-        if memory_search_instance is None:
+        ctx = _context or {}
+        ms = ctx.get("memory_search", memory_search_instance)
+        ws = ctx.get("workspace", workspace)
+
+        if ms is None:
             return "Memory search is not enabled. Enable it in config.json under the memory section."
 
         top_k = max(1, min(top_k, 20))
@@ -185,12 +195,12 @@ def register_memory_search_tool(registry: ToolRegistry, memory_search_instance, 
         # An empty list is a valid result meaning no memories matched.
         search_failed = False
         try:
-            results = memory_search_instance.search(query, top_k=top_k)
+            results = ms.search(query, top_k=top_k)
         except Exception:
             search_failed = True
 
         if search_failed:
-            return _keyword_fallback(query, workspace)
+            return _keyword_fallback(query, ws)
 
         if not results:
             return "No relevant memories found."
@@ -305,6 +315,143 @@ def register_task_tool(registry: ToolRegistry, allowed: list[str] | None = None)
             ToolParam("result", "string", "Result summary (for complete action)", required=False),
         ],
         handler=manage_tasks,
+    ))
+
+
+def register_persona_tool(registry: ToolRegistry, allowed: list[str] | None = None) -> None:
+    """Register the manage_personas tool for agent-assisted persona management."""
+    if not _is_allowed("manage_personas", allowed):
+        return
+
+    async def manage_personas(action: str, persona_id: str | None = None,
+                              name: str | None = None, description: str | None = None,
+                              soul_content: str | None = None, tools_deny: str | None = None,
+                              model_override: str | None = None, cron_jobs: str | None = None,
+                              _context: dict | None = None) -> str:
+        ctx = _context or {}
+        persona_store = ctx.get("persona_store")
+        scheduler = ctx.get("cron_scheduler")
+
+        if persona_store is None:
+            return json.dumps({"error": "Persona store not available"})
+
+        if action == "list":
+            personas = persona_store.list_all()
+            summaries = [
+                {"id": p.id, "name": p.name, "description": p.description,
+                 "enabled": p.enabled, "model_override": p.model_override}
+                for p in personas
+            ]
+            return json.dumps({"personas": summaries})
+
+        elif action == "get":
+            if not persona_id:
+                return json.dumps({"error": "persona_id is required for get"})
+            p = persona_store.get(persona_id)
+            if not p:
+                return json.dumps({"error": f"Persona '{persona_id}' not found"})
+            result = {
+                "id": p.id, "name": p.name, "description": p.description,
+                "enabled": p.enabled, "tools_deny": p.tools_deny,
+                "model_override": p.model_override, "cron_enabled": p.cron_enabled,
+            }
+            soul_path = Path(p.workspace_path) / "SOUL.md"
+            if soul_path.exists():
+                result["soul_content"] = soul_path.read_text(encoding="utf-8")
+            return json.dumps(result)
+
+        elif action == "create":
+            if not persona_id or not name:
+                return json.dumps({"error": "persona_id and name are required for create"})
+            parsed_tools_deny = None
+            if tools_deny:
+                parsed_tools_deny = [t.strip() for t in tools_deny.split(",") if t.strip()]
+            parsed_cron_jobs = None
+            if cron_jobs:
+                try:
+                    parsed_cron_jobs = json.loads(cron_jobs)
+                except json.JSONDecodeError:
+                    return json.dumps({"error": "cron_jobs must be a valid JSON array"})
+            try:
+                p = persona_store.create(
+                    id=persona_id, name=name,
+                    description=description or "",
+                    soul_content=soul_content or "",
+                    tools_deny=parsed_tools_deny,
+                    cron_jobs=parsed_cron_jobs,
+                    model_override=model_override,
+                )
+            except ValueError as e:
+                return json.dumps({"error": str(e)})
+            if scheduler:
+                scheduler.load_jobs()
+            return json.dumps({"status": "created", "id": p.id, "name": p.name,
+                               "workspace_path": p.workspace_path})
+
+        elif action == "update":
+            if not persona_id:
+                return json.dumps({"error": "persona_id is required for update"})
+            kwargs = {}
+            if name is not None:
+                kwargs["name"] = name
+            if description is not None:
+                kwargs["description"] = description
+            if soul_content is not None:
+                kwargs["soul_content"] = soul_content
+            if model_override is not None:
+                kwargs["model_override"] = model_override
+            if tools_deny is not None:
+                kwargs["tools_deny"] = [t.strip() for t in tools_deny.split(",") if t.strip()]
+            if cron_jobs is not None:
+                try:
+                    parsed = json.loads(cron_jobs)
+                    # Write cron.json directly
+                    p = persona_store.get(persona_id)
+                    if p:
+                        cron_path = Path(p.workspace_path) / "cron.json"
+                        cron_path.write_text(json.dumps({"jobs": parsed}, indent=2), encoding="utf-8")
+                except json.JSONDecodeError:
+                    return json.dumps({"error": "cron_jobs must be a valid JSON array"})
+            try:
+                p = persona_store.update(persona_id, **kwargs)
+            except ValueError as e:
+                return json.dumps({"error": str(e)})
+            if scheduler:
+                scheduler.load_jobs()
+            return json.dumps({"status": "updated", "id": p.id, "name": p.name})
+
+        elif action == "delete":
+            if not persona_id:
+                return json.dumps({"error": "persona_id is required for delete"})
+            if persona_id == "default":
+                return json.dumps({"error": "Cannot delete the default persona"})
+            try:
+                deleted = persona_store.delete(persona_id)
+            except ValueError as e:
+                return json.dumps({"error": str(e)})
+            if not deleted:
+                return json.dumps({"error": f"Persona '{persona_id}' not found"})
+            if scheduler:
+                scheduler.load_jobs()
+            return json.dumps({"status": "deleted", "id": persona_id})
+
+        else:
+            return json.dumps({"error": f"Unknown action: {action}. Use: create, list, get, update, delete"})
+
+    registry.register(Tool(
+        name="manage_personas",
+        description="Manage agent personas. Actions: create, list, get, update, delete. Use to create specialized agents with custom identities, tool restrictions, model overrides, and cron jobs.",
+        params=[
+            ToolParam("action", "string", "Action: create, list, get, update, delete"),
+            ToolParam("persona_id", "string", "Persona ID slug (required for create/get/update/delete)", required=False),
+            ToolParam("name", "string", "Display name (required for create)", required=False),
+            ToolParam("description", "string", "Short description", required=False),
+            ToolParam("soul_content", "string", "SOUL.md content — persona identity and instructions", required=False),
+            ToolParam("tools_deny", "string", "Comma-separated tools to deny, e.g. 'shell,web_fetch_stealth'", required=False),
+            ToolParam("model_override", "string", "Model override, e.g. 'openrouter/anthropic/claude-sonnet-4-6'", required=False),
+            ToolParam("cron_jobs", "string", 'JSON array of cron jobs: [{"id":"x","name":"X","schedule":"daily 09:00","prompt":"...","enabled":true}]', required=False),
+        ],
+        handler=manage_personas,
     ))
 
 

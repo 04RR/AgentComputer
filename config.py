@@ -24,6 +24,7 @@ class LMStudioConfig(BaseModel):
 class ToolsConfig(BaseModel):
     allow: list[str] = Field(default_factory=lambda: [
         "shell", "read_file", "write_file", "list_directory", "web_fetch", "manage_tasks", "memory_search",
+        "manage_personas",
         "browser_navigate", "browser_snapshot", "browser_click", "browser_type",
         "browser_fill", "browser_press", "browser_scroll", "browser_text",
         "browser_screenshot", "browser_tabs",

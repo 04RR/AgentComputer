@@ -31,6 +31,7 @@ from typing import Any, TYPE_CHECKING
 if TYPE_CHECKING:
     from agent import AgentRuntime
     from session import SessionManager
+    from persona import PersonaStore
 
 logger = logging.getLogger("agent_computer.cron")
 
@@ -49,6 +50,7 @@ class CronJob:
     last_run: float | None = None
     next_run: float | None = None
     run_count: int = 0
+    persona_id: str = "default"
 
 
 class CronScheduler:
@@ -71,43 +73,63 @@ class CronScheduler:
         self.jobs: dict[str, CronJob] = {}
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
+        self.persona_store: PersonaStore | None = None
+        self._get_memory_search = None  # callback: (persona_id) -> MemorySearch | None
 
     def load_jobs(self) -> int:
-        """Load jobs from workspace/cron.json. Returns count of jobs loaded."""
-        cron_path = Path(self.workspace) / CRON_FILE
-        if not cron_path.exists():
-            logger.info(f"No {CRON_FILE} found in workspace — cron disabled")
-            return 0
+        """Load jobs from workspace/cron.json and persona cron files. Returns count of jobs loaded."""
+        self.jobs.clear()
 
+        # Load root cron.json
+        cron_path = Path(self.workspace) / CRON_FILE
+        if cron_path.exists():
+            self._load_cron_file(cron_path, persona_id="default")
+        else:
+            logger.info(f"No {CRON_FILE} found in workspace — root cron disabled")
+
+        # Load persona cron jobs
+        if self.persona_store:
+            for persona in self.persona_store.list_all():
+                if persona.id == "default" or not persona.enabled or not persona.cron_enabled:
+                    continue
+                p_cron_path = Path(persona.workspace_path) / CRON_FILE
+                if p_cron_path.exists():
+                    self._load_cron_file(p_cron_path, persona_id=persona.id)
+
+        return len(self.jobs)
+
+    def _load_cron_file(self, cron_path: Path, persona_id: str = "default") -> None:
+        """Load jobs from a single cron.json file."""
         try:
             with open(cron_path, encoding="utf-8") as f:
                 raw = json.load(f)
         except (json.JSONDecodeError, OSError) as e:
-            logger.error(f"Failed to load {CRON_FILE}: {e}")
-            return 0
+            logger.error(f"Failed to load {cron_path}: {e}")
+            return
 
         jobs_data = raw if isinstance(raw, list) else raw.get("jobs", [])
-        self.jobs.clear()
 
         for entry in jobs_data:
-            job_id = entry.get("id", f"job-{len(self.jobs)}")
+            raw_id = entry.get("id", f"job-{len(self.jobs)}")
+            # Namespace persona job IDs to prevent collisions
+            job_id = f"{persona_id}:{raw_id}" if persona_id != "default" else raw_id
+            session_id = entry.get("session_id", f"cron-{job_id}")
             job = CronJob(
                 id=job_id,
-                name=entry.get("name", job_id),
+                name=entry.get("name", raw_id),
                 schedule=entry.get("schedule", "every 1h"),
                 prompt=entry.get("prompt", ""),
-                session_id=entry.get("session_id", f"cron-{job_id}"),
+                session_id=session_id,
                 enabled=entry.get("enabled", True),
+                persona_id=persona_id,
             )
             if job.prompt and job.enabled:
                 job.next_run = _compute_next_run(job.schedule)
                 self.jobs[job_id] = job
                 logger.info(
                     f"Loaded cron job: {job.name} [{job.schedule}] "
-                    f"→ next run at {_fmt_ts(job.next_run)}"
+                    f"(persona={persona_id}) → next run at {_fmt_ts(job.next_run)}"
                 )
-
-        return len(self.jobs)
 
     def start(self) -> None:
         """Start the scheduler background task."""
@@ -161,13 +183,23 @@ class CronScheduler:
     async def _run_job(self, job: CronJob) -> None:
         """Execute a single cron job by sending its prompt to the agent."""
         session_id = job.session_id or f"cron-{job.id}"
-        logger.info(f"⏰ Running cron job: {job.name} → session={session_id}")
+        logger.info(f"⏰ Running cron job: {job.name} → session={session_id} (persona={job.persona_id})")
 
-        session = self.session_mgr.get_or_create(session_id)
+        session = self.session_mgr.get_or_create(session_id, persona_id=job.persona_id)
+
+        # Resolve persona and memory search for non-default personas
+        persona = None
+        ms_override = None
+        if self.persona_store and job.persona_id != "default":
+            persona = self.persona_store.get(job.persona_id)
+        if self._get_memory_search:
+            ms_override = self._get_memory_search(job.persona_id)
 
         try:
             async with session.lock:
-                response = await self.agent.run_simple(session, job.prompt)
+                response = await self.agent.run_simple(
+                    session, job.prompt, persona=persona, memory_search_override=ms_override
+                )
 
             job.last_run = time.time()
             job.run_count += 1
@@ -196,6 +228,7 @@ class CronScheduler:
                 "next_run": _fmt_ts(job.next_run) if job.next_run else None,
                 "run_count": job.run_count,
                 "prompt_preview": job.prompt[:100],
+                "persona_id": job.persona_id,
             }
             for job in self.jobs.values()
         ]

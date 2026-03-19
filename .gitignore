@@ -33,3 +33,5 @@ config.json
 start_gateway.bat
 start_gateway.sh
 start_claude.bat
+
+.claude/

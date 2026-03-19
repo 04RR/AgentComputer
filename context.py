@@ -76,16 +76,22 @@ The user has approved your plan. Execute it now.
 DEEP_WORK_INSTRUCTIONS = DEEP_WORK_PLANNING_INSTRUCTIONS
 
 
-def load_static_context(workspace: str) -> dict:
+def load_static_context(workspace: str, user_md_path: str | None = None) -> dict:
     """Read static workspace files once per run. Returns dict to unpack into build_system_prompt.
 
     Keys: soul_content, user_content, static_memory_fallback
+
+    If user_md_path is provided, USER.md is read from that path instead of the
+    workspace directory (used for personas that share the root USER.md).
     """
     workspace_path = Path(workspace)
     result = {"soul_content": "", "user_content": "", "static_memory_fallback": ""}
 
     for fname, key in [("SOUL.md", "soul_content"), ("USER.md", "user_content")]:
-        path = workspace_path / fname
+        if fname == "USER.md" and user_md_path:
+            path = Path(user_md_path)
+        else:
+            path = workspace_path / fname
         if path.exists():
             content = path.read_text(encoding="utf-8").strip()
             if content:
@@ -173,7 +179,20 @@ one operation depends on another's output.""")
             "</available_tools>"
         )
 
-    # 4.5. Parallel tool usage examples (deep work mode only)
+    # 4.5. Persona management instructions
+    if tool_names and "manage_personas" in tool_names:
+        parts.append("""<persona_management>
+When the user asks you to create a specialized agent/persona, use manage_personas:
+1. Draft a SOUL.md (personality, rules, capabilities)
+2. Decide tool restrictions (tools_deny) if needed — e.g. "shell" for read-only personas
+3. If recurring tasks are needed, include cron_jobs with schedules
+4. Call manage_personas with action="create" and all fields
+5. Confirm creation and tell the user how to switch to it
+
+Cron schedule formats: "daily HH:MM", "every 30m", "every 2h", "hourly :MM", "startup"
+</persona_management>""")
+
+    # 4.6. Parallel tool usage examples (deep work mode only)
     if mode == "deep_work":
         parts.append("""<parallel_tool_examples>
 GOOD - Batched (1 iteration):

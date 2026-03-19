@@ -23,7 +23,8 @@
         "web_fetch_js",
         "web_fetch_stealth",
         "manage_tasks",
-        "memory_search"
+        "memory_search",
+        "manage_personas"
       ],
       "require_approval": [
         "shell"

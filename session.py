@@ -72,6 +72,7 @@ class Session:
         self.task_store = TaskStore(Path(storage_dir) / f"{session_id}.tasks.json")
         self.mode: str = "bounded"  # "bounded" or "deep_work"
         self.deep_work_phase: str | None = None  # None, "planning", "executing"
+        self.persona_id: str = "default"
         # Incremental OpenAI message conversion cache
         self._openai_cache: list[dict] = []
         self._openai_cache_len: int = 0
@@ -96,9 +97,19 @@ class Session:
                         tool_call_id=data.get("tool_call_id"),
                         tool_name=data.get("tool_name"),
                     ))
-            logger.info(f"Loaded session {self.session_id}: {len(self.messages)} messages")
+            # Scan for persona_id in meta messages
+            for msg in self.messages:
+                if msg.role == "meta" and isinstance(msg.content, dict) and "persona_id" in msg.content:
+                    self.persona_id = msg.content["persona_id"]
+                    break
+            logger.info(f"Loaded session {self.session_id}: {len(self.messages)} messages (persona={self.persona_id})")
         except Exception as e:
             logger.error(f"Failed to load session {self.session_id}: {e}")
+
+    def set_persona(self, persona_id: str) -> None:
+        """Set the persona for this session and persist it as a meta message."""
+        self.persona_id = persona_id
+        self.add_message("meta", {"persona_id": persona_id})
 
     def _persist(self, message: Message) -> None:
         self._write_buffer.append(message.to_jsonl() + "\n")
@@ -362,11 +373,14 @@ class SessionManager:
         self._sessions: dict[str, Session] = {}
         Path(storage_dir).mkdir(parents=True, exist_ok=True)
 
-    def get_or_create(self, session_id: str | None = None) -> Session:
+    def get_or_create(self, session_id: str | None = None, persona_id: str = "default") -> Session:
         if session_id is None:
             session_id = str(uuid.uuid4())[:8]
         if session_id not in self._sessions:
-            self._sessions[session_id] = Session(session_id, self._storage_dir)
+            session = Session(session_id, self._storage_dir)
+            if persona_id != "default" and session.persona_id == "default":
+                session.set_persona(persona_id)
+            self._sessions[session_id] = session
         return self._sessions[session_id]
 
     def list_sessions(self) -> list[dict]:
@@ -383,9 +397,14 @@ class SessionManager:
                     "last_activity": session.get_last_activity(),
                     "created_at": session.get_created_at(),
                     "token_usage": session.get_token_usage(),
+                    "persona_id": session.persona_id,
                 })
         results.sort(key=lambda x: x.get("last_activity") or 0, reverse=True)
         return results
+
+    def list_sessions_for_persona(self, persona_id: str) -> list[dict]:
+        """List sessions filtered by persona_id."""
+        return [s for s in self.list_sessions() if s.get("persona_id") == persona_id]
 
     def get_aggregate_usage(self, since: float | None = None) -> dict:
         """Aggregate token usage across all sessions, optionally filtered by time."""

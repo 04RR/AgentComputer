@@ -29,11 +29,12 @@ from config import load_config
 from agent import AgentRuntime, subscribe_activity, unsubscribe_activity, get_recent_activity
 from session import SessionManager
 from tool_registry import ToolRegistry
-from tools import register_builtin_tools, register_task_tool, register_memory_search_tool
+from tools import register_builtin_tools, register_task_tool, register_memory_search_tool, register_persona_tool
 from cron import CronScheduler
 from reflection import ReflectionEngine
 from skill_loader import load_skills
 from memory_search import MemorySearch
+from persona import PersonaStore
 
 # ─── Logging ───
 logging.basicConfig(
@@ -66,6 +67,7 @@ register_scrapling_tools(tool_registry, config.agent.workspace, allowed=allowed_
 if config.pinchtab.enabled:
     from tools.pinchtab import register_pinchtab_tools
     register_pinchtab_tools(tool_registry, config.agent.workspace, allowed=allowed_tools, pinchtab_config=config.pinchtab)
+register_persona_tool(tool_registry, allowed=allowed_tools)
 tool_registry.set_approval_requirements(config.agent.tools.require_approval)
 
 # Load existing skills into registry
@@ -97,8 +99,47 @@ session_mgr = SessionManager(config.sessions.directory)
 # Agent runtime
 agent = AgentRuntime(config, tool_registry, memory_search=memory_search)
 
+# Persona store
+persona_store = PersonaStore(config.agent.workspace)
+agent.persona_store = persona_store
+
+# Per-persona MemorySearch instances
+_persona_memory: dict[str, MemorySearch] = {}
+
+
+def get_memory_search(persona_id: str):
+    """Get the MemorySearch instance for a persona."""
+    if not config.memory.enabled:
+        return None
+    if persona_id == "default":
+        return memory_search
+    if persona_id not in _persona_memory:
+        persona = persona_store.get(persona_id)
+        if persona:
+            _persona_memory[persona_id] = MemorySearch(
+                workspace=persona.workspace_path,
+                embedding_base_url=config.memory.embedding_base_url,
+                embedding_model=config.memory.embedding_model,
+                top_k=config.memory.top_k,
+            )
+    return _persona_memory.get(persona_id)
+
+
+# Load per-persona skills
+for _persona in persona_store.list_all():
+    if _persona.id == "default":
+        continue
+    _p_skills_dir = Path(_persona.workspace_path) / "memory" / "skills"
+    _p_skill_names = load_skills(_p_skills_dir, tool_registry)
+    if _p_skill_names:
+        config.agent.tools.allow.extend(_p_skill_names)
+        logger.info(f"Loaded {len(_p_skill_names)} skills for persona {_persona.id}")
+
 # Cron scheduler
 scheduler = CronScheduler(config.agent.workspace, agent, session_mgr)
+agent.cron_scheduler = scheduler
+scheduler.persona_store = persona_store
+scheduler._get_memory_search = get_memory_search
 scheduler.load_jobs()
 
 # Signals that the server has finished initializing
@@ -128,50 +169,86 @@ app = FastAPI(title="agent_computer Gateway", version="0.1.0", lifespan=lifespan
 
 
 async def _run_reflection():
-    """Background task: process unprocessed sessions to extract memory."""
+    """Background task: process unprocessed sessions to extract memory (per-persona)."""
     await server_ready.wait()  # Wait for server initialization to complete
 
     try:
         model_id = config.reflection.model_id or config.agent.model.model_id
-        engine = ReflectionEngine(
-            workspace=config.agent.workspace,
-            client=agent.client,
-            model_id=model_id,
-            max_tokens=config.reflection.max_tokens,
-            provider=config.agent.model.provider,
-            memory_search=memory_search,
-        )
-
-        # Scan for all session JSONL files
         sessions_dir = Path(config.sessions.directory)
         all_ids = [f.stem for f in sessions_dir.glob("*.jsonl") if f.stat().st_size > 0]
-        unprocessed = engine.get_unprocessed(all_ids)
 
-        if not unprocessed:
-            logger.info("Auto-reflection: no unprocessed sessions")
+        if not all_ids:
+            logger.info("Auto-reflection: no sessions found")
             return
 
-        batch = unprocessed[:config.reflection.max_sessions_per_startup]
-        logger.info(f"Reflecting on {len(batch)} unprocessed sessions")
-
-        for session_id in batch:
+        # Group sessions by persona_id (peek at first few lines for meta message)
+        persona_sessions: dict[str, list[str]] = {}
+        for sid in all_ids:
+            pid = "default"
+            jsonl_path = sessions_dir / f"{sid}.jsonl"
             try:
-                messages = _load_session_messages(sessions_dir / f"{session_id}.jsonl")
-                await engine.process_session(session_id, messages)
-            except Exception as e:
-                logger.error(f"Reflection error for session {session_id}: {e}")
-                engine._update_index(session_id, {
-                    "session_id": session_id,
-                    "processed_at": time.time(),
-                    "status": "error",
-                    "error": str(e),
-                })
+                with open(jsonl_path, encoding="utf-8") as f:
+                    for line_num, line in enumerate(f):
+                        if line_num >= 10:
+                            break
+                        line = line.strip()
+                        if not line:
+                            continue
+                        data = json.loads(line)
+                        if data.get("role") == "meta" and isinstance(data.get("content"), dict) and "persona_id" in data["content"]:
+                            pid = data["content"]["persona_id"]
+                            break
+            except Exception:
+                pass
+            persona_sessions.setdefault(pid, []).append(sid)
 
-        # Reload skills in case new ones were extracted
-        new_skills = load_skills(skills_dir, tool_registry)
-        if new_skills:
-            config.agent.tools.allow.extend(new_skills)
-            logger.info(f"New skills loaded after reflection: {', '.join(new_skills)}")
+        # Process each persona's sessions with its own ReflectionEngine
+        for pid, sids in persona_sessions.items():
+            if pid == "default":
+                ws = config.agent.workspace
+                ms = memory_search
+            else:
+                persona = persona_store.get(pid)
+                if not persona:
+                    continue
+                ws = persona.workspace_path
+                ms = get_memory_search(pid)
+
+            engine = ReflectionEngine(
+                workspace=ws,
+                client=agent.client,
+                model_id=model_id,
+                max_tokens=config.reflection.max_tokens,
+                provider=config.agent.model.provider,
+                memory_search=ms,
+            )
+
+            unprocessed = engine.get_unprocessed(sids)
+            if not unprocessed:
+                continue
+
+            batch = unprocessed[:config.reflection.max_sessions_per_startup]
+            logger.info(f"Reflecting on {len(batch)} sessions for persona={pid}")
+
+            for session_id in batch:
+                try:
+                    messages = _load_session_messages(sessions_dir / f"{session_id}.jsonl")
+                    await engine.process_session(session_id, messages)
+                except Exception as e:
+                    logger.error(f"Reflection error for session {session_id}: {e}")
+                    engine._update_index(session_id, {
+                        "session_id": session_id,
+                        "processed_at": time.time(),
+                        "status": "error",
+                        "error": str(e),
+                    })
+
+            # Reload skills for this persona
+            p_skills_dir = Path(ws) / "memory" / "skills"
+            new_skills = load_skills(p_skills_dir, tool_registry)
+            if new_skills:
+                config.agent.tools.allow.extend(new_skills)
+                logger.info(f"New skills loaded after reflection (persona={pid}): {', '.join(new_skills)}")
 
         logger.info("Auto-reflection complete")
 
@@ -227,7 +304,16 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         while True:
             data = await websocket.receive_json()
 
-            if data.get("type") == "message":
+            if data.get("type") == "set_persona":
+                pid = data.get("persona_id", "default")
+                p = persona_store.get(pid)
+                if not p:
+                    await websocket.send_json({"type": "error", "message": f"Unknown persona: {pid}"})
+                    continue
+                session.set_persona(pid)
+                await websocket.send_json({"type": "persona_changed", "persona_id": pid})
+
+            elif data.get("type") == "message":
                 content = data.get("content", "").strip()
                 if not content:
                     continue
@@ -236,11 +322,15 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 # Per-message mode field is ignored for WebSocket — prevents stale
                 # JS state from overriding the session mode.
                 effective_mode = session.mode
-                logger.info(f"Processing message in session={session_id} mode={effective_mode}")
+                logger.info(f"Processing message in session={session_id} mode={effective_mode} persona={session.persona_id}")
+
+                # Resolve persona from session
+                ws_persona = persona_store.get(session.persona_id) if session.persona_id != "default" else None
+                ws_ms_override = get_memory_search(session.persona_id)
 
                 # Serial execution — acquire session lock
                 async with session.lock:
-                    async for event in agent.run(session, content, mode=effective_mode):
+                    async for event in agent.run(session, content, mode=effective_mode, persona=ws_persona, memory_search_override=ws_ms_override):
                         await websocket.send_json({
                             "type": event.type,
                             **event.data,
@@ -254,8 +344,10 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 if feedback:
                     approval_msg += f"\n\nAdditional notes from user: {feedback}"
                 logger.info(f"Plan approved for session={session_id}, transitioning to execution phase")
+                ws_persona = persona_store.get(session.persona_id) if session.persona_id != "default" else None
+                ws_ms_override = get_memory_search(session.persona_id)
                 async with session.lock:
-                    async for event in agent.run(session, approval_msg, mode="deep_work"):
+                    async for event in agent.run(session, approval_msg, mode="deep_work", persona=ws_persona, memory_search_override=ws_ms_override):
                         await websocket.send_json({
                             "type": event.type,
                             **event.data,
@@ -267,8 +359,10 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 if not feedback:
                     continue
                 logger.info(f"Plan revision requested for session={session_id}")
+                ws_persona = persona_store.get(session.persona_id) if session.persona_id != "default" else None
+                ws_ms_override = get_memory_search(session.persona_id)
                 async with session.lock:
-                    async for event in agent.run(session, feedback, mode="deep_work"):
+                    async for event in agent.run(session, feedback, mode="deep_work", persona=ws_persona, memory_search_override=ws_ms_override):
                         await websocket.send_json({
                             "type": event.type,
                             **event.data,
@@ -317,23 +411,30 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 async def chat(session_id: str, body: dict):
     """Simple HTTP chat endpoint. Blocks until the agent loop completes.
 
-    POST body: {"message": "your message here", "mode": "bounded"|"deep_work"}
-    Response: {"response": "...", "session_id": "...", "mode": "..."}
+    POST body: {"message": "your message here", "mode": "bounded"|"deep_work", "persona_id": "default"}
+    Response: {"response": "...", "session_id": "...", "mode": "...", "persona_id": "..."}
     """
     message = body.get("message", "").strip()
     if not message:
         raise HTTPException(400, "Empty message")
 
     chat_mode = body.get("mode")
-    session = session_mgr.get_or_create(session_id)
+    chat_persona_id = body.get("persona_id", "default")
+    session = session_mgr.get_or_create(session_id, persona_id=chat_persona_id)
+
+    chat_persona = persona_store.get(chat_persona_id) if chat_persona_id != "default" else None
+    chat_ms = get_memory_search(chat_persona_id)
 
     async with session.lock:
-        response_text = await agent.run_simple(session, message, mode=chat_mode)
+        response_text = await agent.run_simple(
+            session, message, mode=chat_mode, persona=chat_persona, memory_search_override=chat_ms
+        )
 
     return JSONResponse({
         "response": response_text,
         "session_id": session_id,
         "mode": chat_mode or session.mode,
+        "persona_id": session.persona_id,
     })
 
 
@@ -357,6 +458,7 @@ async def session_history(session_id: str):
         "session_id": session_id,
         "messages": session.get_history(),
         "token_usage": session.get_token_usage(),
+        "persona_id": session.persona_id,
     })
 
 
@@ -594,6 +696,264 @@ async def select_model(body: dict):
         "model_id": model_id,
         "base_url": base_url,
     })
+
+
+# ─── Persona API ───
+
+@app.get("/api/personas")
+async def list_personas():
+    """List all personas."""
+    personas = persona_store.list_all()
+    return JSONResponse({
+        "personas": [
+            {
+                "id": p.id,
+                "name": p.name,
+                "description": p.description,
+                "enabled": p.enabled,
+                "tools_allow": p.tools_allow,
+                "tools_deny": p.tools_deny,
+                "model_override": p.model_override,
+                "cron_enabled": p.cron_enabled,
+                "created_at": p.created_at,
+                "workspace_path": p.workspace_path,
+            }
+            for p in personas
+        ]
+    })
+
+
+@app.get("/api/personas/{persona_id}")
+async def get_persona(persona_id: str):
+    """Get a single persona by ID."""
+    p = persona_store.get(persona_id)
+    if not p:
+        raise HTTPException(404, f"Persona '{persona_id}' not found")
+    return JSONResponse({
+        "id": p.id,
+        "name": p.name,
+        "description": p.description,
+        "enabled": p.enabled,
+        "tools_allow": p.tools_allow,
+        "tools_deny": p.tools_deny,
+        "model_override": p.model_override,
+        "cron_enabled": p.cron_enabled,
+        "created_at": p.created_at,
+        "workspace_path": p.workspace_path,
+    })
+
+
+@app.post("/api/personas")
+async def create_persona(body: dict):
+    """Create a new persona.
+
+    POST body: {"id": "slug", "name": "Display Name", "description": "...",
+                "soul_content": "...", "tools_allow": null, "tools_deny": null,
+                "cron_jobs": null, "model_override": null}
+    """
+    pid = body.get("id", "").strip()
+    name = body.get("name", "").strip()
+    description = body.get("description", "").strip()
+    if not pid or not name:
+        raise HTTPException(400, "id and name are required")
+
+    try:
+        p = persona_store.create(
+            id=pid,
+            name=name,
+            description=description,
+            soul_content=body.get("soul_content", ""),
+            tools_allow=body.get("tools_allow"),
+            tools_deny=body.get("tools_deny"),
+            cron_jobs=body.get("cron_jobs"),
+            model_override=body.get("model_override"),
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    # Reload cron jobs to pick up new persona cron
+    scheduler.load_jobs()
+
+    return JSONResponse({
+        "status": "created",
+        "id": p.id,
+        "name": p.name,
+        "workspace_path": p.workspace_path,
+    })
+
+
+@app.put("/api/personas/{persona_id}")
+async def update_persona(persona_id: str, body: dict):
+    """Update a persona's configuration."""
+    try:
+        p = persona_store.update(persona_id, **body)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    # Reload cron jobs in case cron_enabled changed
+    scheduler.load_jobs()
+
+    return JSONResponse({
+        "status": "updated",
+        "persona": {
+            "id": p.id,
+            "name": p.name,
+            "description": p.description,
+            "enabled": p.enabled,
+            "tools_allow": p.tools_allow,
+            "tools_deny": p.tools_deny,
+            "model_override": p.model_override,
+            "cron_enabled": p.cron_enabled,
+            "created_at": p.created_at,
+            "workspace_path": p.workspace_path,
+        },
+    })
+
+
+@app.delete("/api/personas/{persona_id}")
+async def delete_persona(persona_id: str):
+    """Delete a persona and its workspace."""
+    try:
+        deleted = persona_store.delete(persona_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if not deleted:
+        raise HTTPException(404, f"Persona '{persona_id}' not found")
+
+    # Clean up cached memory search
+    _persona_memory.pop(persona_id, None)
+    # Reload cron jobs
+    scheduler.load_jobs()
+
+    return JSONResponse({"status": "deleted", "id": persona_id})
+
+
+_cron_file_lock = asyncio.Lock()
+
+
+def _read_persona_cron(persona_id: str) -> tuple[Path, list[dict]]:
+    """Read cron.json for a persona. Returns (path, jobs_list)."""
+    if persona_id == "default":
+        cron_path = Path(config.agent.workspace) / "cron.json"
+    else:
+        p = persona_store.get(persona_id)
+        if not p:
+            raise HTTPException(404, f"Persona '{persona_id}' not found")
+        cron_path = Path(p.workspace_path) / "cron.json"
+    if not cron_path.exists():
+        return cron_path, []
+    raw = json.loads(cron_path.read_text(encoding="utf-8"))
+    return cron_path, raw if isinstance(raw, list) else raw.get("jobs", [])
+
+
+def _write_persona_cron(cron_path: Path, jobs: list[dict]) -> None:
+    """Write cron.json back — always uses {"jobs": [...]} format."""
+    cron_path.write_text(json.dumps({"jobs": jobs}, indent=2), encoding="utf-8")
+
+
+@app.get("/api/personas/{persona_id}/cron")
+async def persona_cron(persona_id: str):
+    """Get cron jobs for a specific persona."""
+    if persona_id != "default":
+        p = persona_store.get(persona_id)
+        if not p:
+            raise HTTPException(404, f"Persona '{persona_id}' not found")
+    try:
+        _, jobs = _read_persona_cron(persona_id)
+    except HTTPException:
+        raise
+    except Exception:
+        jobs = []
+    return JSONResponse({"persona_id": persona_id, "jobs": jobs})
+
+
+@app.post("/api/personas/{persona_id}/cron")
+async def add_persona_cron_job(persona_id: str, body: dict):
+    """Add a cron job to a persona."""
+    job_id = body.get("id", "").strip()
+    schedule = body.get("schedule", "").strip()
+    if not job_id or not schedule:
+        raise HTTPException(400, "id and schedule are required")
+    async with _cron_file_lock:
+        cron_path, jobs = _read_persona_cron(persona_id)
+        if any(j.get("id") == job_id for j in jobs):
+            raise HTTPException(400, f"Job '{job_id}' already exists")
+        new_job = {
+            "id": job_id,
+            "name": body.get("name", job_id),
+            "schedule": schedule,
+            "prompt": body.get("prompt", ""),
+            "enabled": body.get("enabled", True),
+        }
+        jobs.append(new_job)
+        _write_persona_cron(cron_path, jobs)
+    scheduler.load_jobs()
+    return JSONResponse({"status": "created", "job": new_job})
+
+
+@app.put("/api/personas/{persona_id}/cron/{job_id}")
+async def update_persona_cron_job(persona_id: str, job_id: str, body: dict):
+    """Update a cron job."""
+    async with _cron_file_lock:
+        cron_path, jobs = _read_persona_cron(persona_id)
+        target = None
+        for j in jobs:
+            if j.get("id") == job_id:
+                target = j
+                break
+        if not target:
+            raise HTTPException(404, f"Job '{job_id}' not found")
+        for key in ("name", "schedule", "prompt", "enabled"):
+            if key in body:
+                target[key] = body[key]
+        _write_persona_cron(cron_path, jobs)
+    scheduler.load_jobs()
+    return JSONResponse({"status": "updated", "job": target})
+
+
+@app.delete("/api/personas/{persona_id}/cron/{job_id}")
+async def delete_persona_cron_job(persona_id: str, job_id: str):
+    """Delete a cron job."""
+    async with _cron_file_lock:
+        cron_path, jobs = _read_persona_cron(persona_id)
+        original_len = len(jobs)
+        jobs = [j for j in jobs if j.get("id") != job_id]
+        if len(jobs) == original_len:
+            raise HTTPException(404, f"Job '{job_id}' not found")
+        _write_persona_cron(cron_path, jobs)
+    scheduler.load_jobs()
+    return JSONResponse({"status": "deleted", "job_id": job_id})
+
+
+@app.post("/api/personas/{persona_id}/cron/{job_id}/toggle")
+async def toggle_persona_cron_job(persona_id: str, job_id: str):
+    """Toggle a cron job's enabled state."""
+    async with _cron_file_lock:
+        cron_path, jobs = _read_persona_cron(persona_id)
+        target = None
+        for j in jobs:
+            if j.get("id") == job_id:
+                target = j
+                break
+        if not target:
+            raise HTTPException(404, f"Job '{job_id}' not found")
+        target["enabled"] = not target.get("enabled", True)
+        _write_persona_cron(cron_path, jobs)
+    scheduler.load_jobs()
+    state = "enabled" if target["enabled"] else "disabled"
+    return JSONResponse({"status": state, "job_id": job_id})
+
+
+@app.get("/api/personas/{persona_id}/soul")
+async def persona_soul(persona_id: str):
+    p = persona_store.get(persona_id)
+    if not p:
+        raise HTTPException(404, f"Persona '{persona_id}' not found")
+    soul_path = Path(p.workspace_path) / "SOUL.md"
+    content = ""
+    if soul_path.exists():
+        content = soul_path.read_text(encoding="utf-8")
+    return JSONResponse({"persona_id": persona_id, "content": content})
 
 
 # ─── Cron API ───

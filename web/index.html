@@ -985,6 +985,294 @@
     font-weight: 600;
   }
 
+  /* ── Persona Selector (sidebar) ── */
+  .persona-selector {
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .persona-selector .ps-label {
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+  }
+  .persona-selector select {
+    width: 100%;
+    padding: 5px 8px;
+    font-size: 12px;
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    outline: none;
+    cursor: pointer;
+  }
+  .persona-selector select:focus { border-color: var(--accent); }
+
+  /* ── Persona Badge (header) ── */
+  .persona-badge {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: var(--surface2);
+    color: var(--text-dim);
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .persona-badge.active-persona {
+    background: #60a5fa20;
+    color: var(--blue);
+  }
+  .persona-badge.hidden { display: none; }
+
+  /* ── Personas View ── */
+  #personas-view {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 32px;
+    display: none;
+  }
+
+  /* ── Persona Cards Grid ── */
+  .persona-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+    margin-top: 16px;
+  }
+  .persona-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    transition: border-color 0.15s;
+  }
+  .persona-card:hover { border-color: var(--text-dim); }
+  .persona-card.default {
+    border-color: var(--accent);
+    background: var(--accent-dim);
+  }
+  .persona-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .persona-card-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .persona-card-badge {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-weight: 500;
+  }
+  .persona-card-badge.enabled { color: var(--green); background: #34d39918; }
+  .persona-card-badge.disabled { color: var(--text-dim); background: var(--surface2); }
+  .persona-card-desc {
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+    line-height: 1.4;
+  }
+  .persona-card-meta {
+    font-size: 11px;
+    color: var(--text-dim);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+  .persona-card-meta span {
+    background: var(--surface2);
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+  .persona-card-actions {
+    display: flex;
+    gap: 8px;
+  }
+  .persona-card-actions button {
+    padding: 5px 12px;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 12px;
+    font-family: var(--sans);
+    transition: all 0.15s;
+  }
+  .persona-card-actions button:hover { color: var(--text); border-color: var(--text-dim); }
+  .persona-card-actions button.delete:hover { color: var(--accent); border-color: var(--accent); }
+
+  /* ── Persona Form ── */
+  .persona-form {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .persona-form h3 {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    color: var(--text);
+  }
+  .pf-field {
+    margin-bottom: 14px;
+  }
+  .pf-field label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+    font-weight: 500;
+  }
+  .pf-field input,
+  .pf-field textarea {
+    width: 100%;
+    padding: 8px 10px;
+    font-size: 13px;
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    outline: none;
+  }
+  .pf-field input:focus,
+  .pf-field textarea:focus { border-color: var(--accent); }
+  .pf-field textarea { resize: vertical; min-height: 80px; }
+  .pf-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+  }
+  .pf-btn {
+    padding: 8px 18px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: var(--sans);
+    transition: opacity 0.15s;
+  }
+  .pf-btn:hover { opacity: 0.85; }
+  .pf-btn.primary { background: var(--accent); color: white; }
+  .pf-btn.secondary { background: var(--surface2); color: var(--text); }
+
+  /* ── Persona Cron Section (in edit form) ── */
+  .persona-cron-section {
+    margin-top: 16px;
+    border-top: 1px solid var(--border);
+    padding-top: 14px;
+  }
+  .persona-cron-section h4 {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+  }
+  .persona-cron-job {
+    font-size: 12px;
+    padding: 8px 10px;
+    background: var(--bg);
+    border-radius: 5px;
+    margin-bottom: 4px;
+    color: var(--text);
+  }
+  .persona-cron-job-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .persona-cron-job-schedule {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--blue);
+    background: #60a5fa15;
+    padding: 2px 6px;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+  .persona-cron-job-info {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .persona-cron-job-info .cron-name {
+    font-weight: 500;
+  }
+  .persona-cron-job-info .cron-prompt {
+    font-size: 11px;
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .persona-cron-job-badge {
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-weight: 600;
+    text-transform: uppercase;
+    flex-shrink: 0;
+  }
+  .persona-cron-job-badge.enabled { color: var(--green); background: #34d39918; }
+  .persona-cron-job-badge.disabled { color: var(--text-dim); background: var(--surface2); }
+  .persona-cron-job-actions {
+    display: flex;
+    gap: 4px;
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+  .persona-cron-job-actions button {
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 11px;
+    font-family: var(--sans);
+    transition: all 0.15s;
+  }
+  .persona-cron-job-actions button:hover { color: var(--text); border-color: var(--text-dim); }
+  .persona-cron-job-actions button.delete:hover { color: var(--accent); border-color: var(--accent); }
+  .persona-cron-empty {
+    font-size: 12px;
+    color: var(--text-dim);
+    padding: 6px 0;
+  }
+  .persona-cron-add-form {
+    margin-top: 8px;
+    padding: 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .persona-cron-add-form .pf-field {
+    margin-bottom: 10px;
+  }
+  .persona-cron-add-form .pf-field:last-of-type {
+    margin-bottom: 0;
+  }
+  .persona-cron-hint {
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
   /* Scrollbar */
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -999,6 +1287,7 @@
   <div class="nav-tabs">
     <button class="nav-tab active" onclick="showView('chat')">Chat</button>
     <button class="nav-tab" onclick="showView('dashboard')">Dashboard</button>
+    <button class="nav-tab" onclick="showView('personas')">Personas</button>
   </div>
   <div style="display:flex; align-items:center; gap:12px;">
     <div class="mode-toggle">
@@ -1009,6 +1298,7 @@
       </label>
       <span class="mode-label" id="modeLabelDeep">Deep Work</span>
     </div>
+    <span class="persona-badge hidden" id="personaBadge"></span>
     <button class="model-toggle-btn" id="modelToggleBtn" onclick="toggleRightPanel()">
       <span id="modelBadge">Loading...</span>
     </button>
@@ -1025,6 +1315,12 @@
     <div class="sidebar-header">
       <span>Sessions</span>
       <button onclick="newSession()">+ New</button>
+    </div>
+    <div class="persona-selector" id="personaSelector">
+      <div class="ps-label">Persona</div>
+      <select id="personaSelect" onchange="onPersonaSelectChange()">
+        <option value="default">Default</option>
+      </select>
     </div>
     <div class="session-list" id="sessionList"></div>
   </div>
@@ -1090,6 +1386,16 @@
     </div>
   </div>
 
+  <!-- Personas View -->
+  <div id="personas-view">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+      <div class="dash-section-title">Personas</div>
+      <button class="pf-btn primary" onclick="showPersonaForm()">+ Create Persona</button>
+    </div>
+    <div id="personaFormContainer"></div>
+    <div class="persona-cards" id="personaCards"></div>
+  </div>
+
   <!-- Right Panel: Model Selector -->
   <div id="right-panel" class="collapsed">
     <div class="rpanel-header">
@@ -1132,6 +1438,8 @@ let currentAssistantRawText = '';
 let currentMode = 'bounded';
 let taskPanelCollapsed = false;
 let deepWorkPhase = null; // null, 'planning', 'awaiting_approval', 'executing'
+let currentPersonaId = 'default';
+let personas = [];
 
 // ─── Markdown rendering ───
 marked.setOptions({
@@ -1156,6 +1464,7 @@ function showView(view) {
   currentView = view;
   document.getElementById('chat-view').style.display = view === 'chat' ? 'flex' : 'none';
   document.getElementById('dashboard-view').style.display = view === 'dashboard' ? 'block' : 'none';
+  document.getElementById('personas-view').style.display = view === 'personas' ? 'block' : 'none';
   document.querySelectorAll('.nav-tab').forEach(tab => {
     tab.classList.toggle('active', tab.textContent.toLowerCase() === view);
   });
@@ -1164,6 +1473,8 @@ function showView(view) {
     connectActivityWs();
   } else if (view === 'chat') {
     inputEl.focus();
+  } else if (view === 'personas') {
+    loadPersonaCards();
   }
 }
 
@@ -1179,6 +1490,9 @@ function connect() {
     // Sync current mode to server on connect/reconnect
     if (currentMode !== 'bounded') {
       ws.send(JSON.stringify({ type: 'set_mode', mode: currentMode }));
+    }
+    if (currentPersonaId !== 'default') {
+      ws.send(JSON.stringify({ type: 'set_persona', persona_id: currentPersonaId }));
     }
   };
 
@@ -1266,6 +1580,12 @@ function handleEvent(data) {
         deepWorkPhase = null;
       }
       updateModeUI();
+      break;
+
+    case 'persona_changed':
+      currentPersonaId = data.persona_id;
+      document.getElementById('personaSelect').value = currentPersonaId;
+      updatePersonaBadge();
       break;
 
     case 'done':
@@ -1409,7 +1729,14 @@ async function loadSessions() {
 function renderSessions() {
   const list = document.getElementById('sessionList');
   list.innerHTML = '';
-  for (const s of sessions) {
+
+  // Filter sessions by persona
+  let filtered = sessions;
+  if (currentPersonaId !== 'default') {
+    filtered = sessions.filter(s => s.persona_id === currentPersonaId);
+  }
+
+  for (const s of filtered) {
     const div = document.createElement('div');
     div.className = `session-item${s.session_id === sessionId ? ' active' : ''}`;
 
@@ -1417,9 +1744,17 @@ function renderSessions() {
     const timeStr = s.last_activity ? timeAgo(s.last_activity) : '';
     const msgCount = s.messages || 0;
 
+    // Show persona tag for non-default sessions when viewing all
+    let personaTag = '';
+    if (currentPersonaId === 'default' && s.persona_id && s.persona_id !== 'default') {
+      const p = personas.find(p => p.id === s.persona_id);
+      const pName = p ? p.name : s.persona_id;
+      personaTag = ` · ${escapeHtml(pName)}`;
+    }
+
     div.innerHTML = `
       <div class="session-preview">${preview}</div>
-      <div class="session-meta">${msgCount} msgs${timeStr ? ' \u00b7 ' + timeStr : ''}</div>
+      <div class="session-meta">${msgCount} msgs${timeStr ? ' \u00b7 ' + timeStr : ''}${personaTag}</div>
       <div class="session-delete" title="Delete session">\u00d7</div>
     `;
 
@@ -1454,6 +1789,11 @@ async function switchSession(newSessionId) {
     const resp = await fetch(`/api/sessions/${sessionId}/history`);
     const data = await resp.json();
     renderHistory(data.messages);
+    if (data.persona_id) {
+      currentPersonaId = data.persona_id;
+      document.getElementById('personaSelect').value = currentPersonaId;
+      updatePersonaBadge();
+    }
   } catch (e) {
     addSystem('Failed to load session history');
   }
@@ -2069,6 +2409,402 @@ function updateExecPhase(phase) {
   if (el) el.textContent = phase;
 }
 
+// ─── Persona Functions ───
+async function loadPersonas() {
+  try {
+    const resp = await fetch('/api/personas');
+    const data = await resp.json();
+    personas = data.personas;
+    populatePersonaSelect();
+    updatePersonaBadge();
+  } catch (e) {
+    console.error('Failed to load personas:', e);
+  }
+}
+
+function populatePersonaSelect() {
+  const sel = document.getElementById('personaSelect');
+  sel.innerHTML = '<option value="default">Default</option>';
+  for (const p of personas) {
+    if (p.id === 'default') continue;
+    if (!p.enabled) continue;
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = p.name;
+    sel.appendChild(opt);
+  }
+  sel.value = currentPersonaId;
+}
+
+function onPersonaSelectChange() {
+  currentPersonaId = document.getElementById('personaSelect').value;
+  updatePersonaBadge();
+  renderSessions();
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'set_persona', persona_id: currentPersonaId }));
+  }
+}
+
+function updatePersonaBadge() {
+  const badge = document.getElementById('personaBadge');
+  if (currentPersonaId === 'default') {
+    badge.className = 'persona-badge hidden';
+    badge.textContent = '';
+  } else {
+    const p = personas.find(p => p.id === currentPersonaId);
+    badge.textContent = p ? p.name : currentPersonaId;
+    badge.className = 'persona-badge active-persona';
+  }
+}
+
+async function loadPersonaCards() {
+  await loadPersonas();
+  const container = document.getElementById('personaCards');
+  container.innerHTML = '';
+
+  for (const p of personas) {
+    const isDefault = p.id === 'default';
+    const card = document.createElement('div');
+    card.className = `persona-card${isDefault ? ' default' : ''}`;
+
+    // Meta tags
+    let metaHtml = '';
+    if (p.tools_deny && p.tools_deny.length) {
+      metaHtml += p.tools_deny.map(t => `<span>deny: ${escapeHtml(t)}</span>`).join('');
+    }
+    if (p.model_override) {
+      metaHtml += `<span>model: ${escapeHtml(p.model_override)}</span>`;
+    }
+    if (p.cron_enabled) {
+      metaHtml += '<span>cron: on</span>';
+    }
+
+    // Actions
+    let actionsHtml = '';
+    if (!isDefault) {
+      actionsHtml = `
+        <div class="persona-card-actions">
+          <button onclick="editPersona('${escapeHtml(p.id)}')">Edit</button>
+          <button class="delete" onclick="deletePersona('${escapeHtml(p.id)}')">Delete</button>
+        </div>
+      `;
+    }
+
+    card.innerHTML = `
+      <div class="persona-card-header">
+        <span class="persona-card-name">${escapeHtml(p.name)}</span>
+        <span class="persona-card-badge ${p.enabled ? 'enabled' : 'disabled'}">${p.enabled ? 'enabled' : 'disabled'}</span>
+      </div>
+      <div class="persona-card-desc">${escapeHtml(p.description || 'No description')}</div>
+      ${metaHtml ? '<div class="persona-card-meta">' + metaHtml + '</div>' : ''}
+      ${actionsHtml}
+    `;
+    container.appendChild(card);
+  }
+}
+
+function showPersonaForm(editId) {
+  const container = document.getElementById('personaFormContainer');
+  const isEdit = !!editId;
+  const persona = isEdit ? personas.find(p => p.id === editId) : null;
+
+  container.innerHTML = `
+    <div class="persona-form">
+      <h3>${isEdit ? 'Edit Persona' : 'Create Persona'}</h3>
+      ${!isEdit ? `
+        <div class="pf-field">
+          <label>ID (slug)</label>
+          <input type="text" id="pfId" placeholder="e.g. research-bot" />
+        </div>
+      ` : ''}
+      <div class="pf-field">
+        <label>Name</label>
+        <input type="text" id="pfName" value="${isEdit ? escapeHtml(persona.name) : ''}" placeholder="Display name" oninput="${!isEdit ? 'autoSlugPersonaId()' : ''}" />
+      </div>
+      <div class="pf-field">
+        <label>Description</label>
+        <input type="text" id="pfDesc" value="${isEdit ? escapeHtml(persona.description || '') : ''}" placeholder="Short description" />
+      </div>
+      <div class="pf-field">
+        <label>SOUL.md Content</label>
+        <textarea id="pfSoul" rows="6" placeholder="Persona instructions and identity...">${isEdit ? '' : ''}</textarea>
+      </div>
+      <div class="pf-field">
+        <label>Tools Deny (comma-separated)</label>
+        <input type="text" id="pfToolsDeny" value="${isEdit && persona.tools_deny ? escapeHtml(persona.tools_deny.join(', ')) : ''}" placeholder="e.g. shell, file_write" />
+      </div>
+      <div class="pf-field">
+        <label>Model Override</label>
+        <input type="text" id="pfModel" value="${isEdit && persona.model_override ? escapeHtml(persona.model_override) : ''}" placeholder="e.g. openrouter/anthropic/claude-sonnet-4-6 or lmstudio/model-name" />
+      </div>
+      <div class="pf-field" style="display:flex; align-items:center; gap:8px;">
+        <input type="checkbox" id="pfCronEnabled" ${isEdit && persona.cron_enabled ? 'checked' : ''} />
+        <label for="pfCronEnabled" style="margin-bottom:0;">Enable cron jobs</label>
+      </div>
+      <div id="pfCronSection"></div>
+      <div class="pf-actions">
+        <button class="pf-btn primary" onclick="submitPersonaForm(${isEdit ? "'" + escapeHtml(editId) + "'" : ''})">${isEdit ? 'Update' : 'Create'}</button>
+        <button class="pf-btn secondary" onclick="hidePersonaForm()">Cancel</button>
+      </div>
+    </div>
+  `;
+
+  if (isEdit) {
+    loadPersonaSoul(editId);
+    loadPersonaCron(editId);
+  }
+}
+
+function hidePersonaForm() {
+  document.getElementById('personaFormContainer').innerHTML = '';
+}
+
+function autoSlugPersonaId() {
+  const nameEl = document.getElementById('pfName');
+  const idEl = document.getElementById('pfId');
+  if (nameEl && idEl) {
+    idEl.value = nameEl.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  }
+}
+
+async function submitPersonaForm(editId) {
+  const isEdit = !!editId;
+  const name = document.getElementById('pfName').value.trim();
+  const desc = document.getElementById('pfDesc').value.trim();
+  const soul = document.getElementById('pfSoul').value;
+  const toolsDenyRaw = document.getElementById('pfToolsDeny').value.trim();
+  const modelOverride = document.getElementById('pfModel').value.trim() || null;
+  const cronEnabled = document.getElementById('pfCronEnabled').checked;
+
+  const toolsDeny = toolsDenyRaw ? toolsDenyRaw.split(',').map(s => s.trim()).filter(Boolean) : null;
+
+  if (!name) {
+    alert('Name is required');
+    return;
+  }
+
+  const body = {
+    name,
+    description: desc,
+    soul_content: soul,
+    tools_deny: toolsDeny,
+    model_override: modelOverride,
+    cron_enabled: cronEnabled,
+  };
+
+  try {
+    let resp;
+    if (isEdit) {
+      resp = await fetch(`/api/personas/${editId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } else {
+      const pid = document.getElementById('pfId').value.trim();
+      if (!pid) {
+        alert('ID is required');
+        return;
+      }
+      body.id = pid;
+      resp = await fetch('/api/personas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    }
+
+    if (!resp.ok) {
+      const err = await resp.json();
+      alert(err.detail || 'Failed to save persona');
+      return;
+    }
+
+    hidePersonaForm();
+    await loadPersonaCards();
+  } catch (e) {
+    alert('Error saving persona: ' + e.message);
+  }
+}
+
+function editPersona(id) {
+  showPersonaForm(id);
+}
+
+async function deletePersona(id) {
+  if (!confirm(`Delete persona "${id}"? This will also remove its workspace.`)) return;
+  try {
+    const resp = await fetch(`/api/personas/${id}`, { method: 'DELETE' });
+    if (!resp.ok) {
+      const err = await resp.json();
+      alert(err.detail || 'Failed to delete persona');
+      return;
+    }
+    if (currentPersonaId === id) {
+      currentPersonaId = 'default';
+      document.getElementById('personaSelect').value = 'default';
+      updatePersonaBadge();
+      renderSessions();
+    }
+    await loadPersonaCards();
+  } catch (e) {
+    alert('Error deleting persona: ' + e.message);
+  }
+}
+
+async function loadPersonaCron(personaId) {
+  const section = document.getElementById('pfCronSection');
+  if (!section) return;
+  try {
+    const resp = await fetch(`/api/personas/${personaId}/cron`);
+    const data = await resp.json();
+    const jobs = data.jobs || [];
+    let html = '<div class="persona-cron-section"><h4>Scheduled Jobs</h4>';
+    if (jobs.length === 0) {
+      html += '<div class="persona-cron-empty">No scheduled jobs configured</div>';
+    } else {
+      for (const job of jobs) {
+        const enabled = job.enabled !== false;
+        html += `<div class="persona-cron-job">
+          <div class="persona-cron-job-row">
+            <span class="persona-cron-job-schedule">${escapeHtml(job.schedule || '')}</span>
+            <div class="persona-cron-job-info">
+              <span class="cron-name">${escapeHtml(job.name || job.id || '')}</span>
+              <div class="cron-prompt">${escapeHtml(job.prompt || '')}</div>
+            </div>
+            <span class="persona-cron-job-badge ${enabled ? 'enabled' : 'disabled'}">${enabled ? 'on' : 'off'}</span>
+            <div class="persona-cron-job-actions">
+              <button onclick="toggleCronJob('${escapeHtml(personaId)}','${escapeHtml(job.id)}')">${enabled ? 'Disable' : 'Enable'}</button>
+              <button onclick="showCronJobForm('${escapeHtml(personaId)}', ${JSON.stringify(job).replace(/"/g, '&quot;')})">Edit</button>
+              <button class="delete" onclick="deleteCronJob('${escapeHtml(personaId)}','${escapeHtml(job.id)}')">Delete</button>
+            </div>
+          </div>
+        </div>`;
+      }
+    }
+    html += `<div style="margin-top:8px;"><button class="pf-btn secondary" style="padding:5px 12px; font-size:12px;" onclick="showCronJobForm('${escapeHtml(personaId)}')">+ Add Scheduled Job</button></div>`;
+    html += '<div id="cronJobFormContainer"></div>';
+    html += '</div>';
+    section.innerHTML = html;
+  } catch (e) {
+    section.innerHTML = '<div class="persona-cron-empty">Failed to load cron jobs</div>';
+  }
+}
+
+function showCronJobForm(personaId, editJob) {
+  const container = document.getElementById('cronJobFormContainer');
+  if (!container) return;
+  const isEdit = !!editJob;
+  container.innerHTML = `
+    <div class="persona-cron-add-form">
+      <div class="pf-field">
+        <label>Job ID</label>
+        <input type="text" id="cronJobId" value="${isEdit ? escapeHtml(editJob.id) : ''}" placeholder="unique-job-id" ${isEdit ? 'readonly style="opacity:0.6"' : ''} />
+      </div>
+      <div class="pf-field">
+        <label>Name</label>
+        <input type="text" id="cronJobName" value="${isEdit ? escapeHtml(editJob.name || '') : ''}" placeholder="Job name" />
+      </div>
+      <div class="pf-field">
+        <label>Schedule</label>
+        <input type="text" id="cronJobSchedule" value="${isEdit ? escapeHtml(editJob.schedule || '') : ''}" placeholder="daily 09:00" />
+        <div class="persona-cron-hint">Formats: "daily HH:MM", "every 30m", "every 2h", "hourly :15", "startup"</div>
+      </div>
+      <div class="pf-field">
+        <label>Prompt</label>
+        <textarea id="cronJobPrompt" rows="3" placeholder="What should the agent do?">${isEdit ? escapeHtml(editJob.prompt || '') : ''}</textarea>
+      </div>
+      <div class="pf-field" style="display:flex; align-items:center; gap:8px;">
+        <input type="checkbox" id="cronJobEnabled" ${!isEdit || editJob.enabled !== false ? 'checked' : ''} />
+        <label for="cronJobEnabled" style="margin-bottom:0;">Enabled</label>
+      </div>
+      <div class="pf-actions" style="margin-top:10px;">
+        <button class="pf-btn primary" style="padding:5px 14px; font-size:12px;" onclick="submitCronJob('${escapeHtml(personaId)}', ${isEdit ? "'" + escapeHtml(editJob.id) + "'" : 'null'})">${isEdit ? 'Update' : 'Add'}</button>
+        <button class="pf-btn secondary" style="padding:5px 14px; font-size:12px;" onclick="document.getElementById('cronJobFormContainer').innerHTML=''">Cancel</button>
+      </div>
+    </div>
+  `;
+}
+
+async function submitCronJob(personaId, editJobId) {
+  const jobId = document.getElementById('cronJobId').value.trim();
+  const name = document.getElementById('cronJobName').value.trim();
+  const schedule = document.getElementById('cronJobSchedule').value.trim();
+  const prompt = document.getElementById('cronJobPrompt').value.trim();
+  const enabled = document.getElementById('cronJobEnabled').checked;
+
+  if (!schedule) { alert('Schedule is required'); return; }
+
+  const body = { name: name || jobId, schedule, prompt, enabled };
+
+  try {
+    let resp;
+    if (editJobId) {
+      resp = await fetch(`/api/personas/${personaId}/cron/${editJobId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } else {
+      if (!jobId) { alert('Job ID is required'); return; }
+      body.id = jobId;
+      resp = await fetch(`/api/personas/${personaId}/cron`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    }
+    if (!resp.ok) {
+      const err = await resp.json();
+      alert(err.detail || 'Failed to save job');
+      return;
+    }
+    loadPersonaCron(personaId);
+  } catch (e) {
+    alert('Error saving cron job: ' + e.message);
+  }
+}
+
+async function deleteCronJob(personaId, jobId) {
+  if (!confirm(`Delete cron job "${jobId}"?`)) return;
+  try {
+    const resp = await fetch(`/api/personas/${personaId}/cron/${jobId}`, { method: 'DELETE' });
+    if (!resp.ok) {
+      const err = await resp.json();
+      alert(err.detail || 'Failed to delete job');
+      return;
+    }
+    loadPersonaCron(personaId);
+  } catch (e) {
+    alert('Error deleting cron job: ' + e.message);
+  }
+}
+
+async function toggleCronJob(personaId, jobId) {
+  try {
+    const resp = await fetch(`/api/personas/${personaId}/cron/${jobId}/toggle`, { method: 'POST' });
+    if (!resp.ok) {
+      const err = await resp.json();
+      alert(err.detail || 'Failed to toggle job');
+      return;
+    }
+    loadPersonaCron(personaId);
+  } catch (e) {
+    alert('Error toggling cron job: ' + e.message);
+  }
+}
+
+async function loadPersonaSoul(personaId) {
+  try {
+    const resp = await fetch(`/api/personas/${personaId}/soul`);
+    const data = await resp.json();
+    const textarea = document.getElementById('pfSoul');
+    if (textarea) textarea.value = data.content || '';
+  } catch (e) {
+    console.error('Failed to load SOUL content:', e);
+  }
+}
+
 // ─── Input handlers ───
 inputEl.addEventListener('input', () => {
   inputEl.style.height = 'auto';
@@ -2087,6 +2823,7 @@ connect();
 loadSessions();
 loadModelBadge();
 loadSessionTasks();
+loadPersonas();
 setInterval(loadSessions, 30000);
 </script>
 </body>
