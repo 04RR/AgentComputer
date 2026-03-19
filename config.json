@@ -10,7 +10,7 @@
     "model": {
       "provider": "lmstudio",
       "model_id": "mistralai/ministral-3-14b-reasoning",
-      "base_url": "http://10.5.0.2:1234/v1",
+      "base_url": "http://100.127.32.115:1234/v1",
       "max_tokens": 8192
     },
     "tools": {
@@ -29,7 +29,7 @@
         "shell"
       ]
     },
-    "max_loop_iterations": 15,
+    "max_loop_iterations": 20,
     "deep_work": {
       "max_iterations": 200,
       "token_budget": 1500000,
@@ -48,7 +48,7 @@
   },
   "memory": {
     "enabled": true,
-    "embedding_base_url": "http://10.5.0.2:1234/v1",
+    "embedding_base_url": "http://100.127.32.115:1234/v1",
     "embedding_model": "text-embedding-granite-embedding-125m-english",
     "top_k": 5
   }

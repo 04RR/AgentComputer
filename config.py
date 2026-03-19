@@ -12,12 +12,12 @@ logger = logging.getLogger("agent_computer.config")
 class ModelConfig(BaseModel):
     provider: str = "lmstudio"
     model_id: str = "qwen/qwen3.5-35b-a3b"
-    base_url: str = "http://10.5.0.2:1234/v1"
+    base_url: str = "http://100.127.32.115:1234/v1"
     max_tokens: int = 4096
 
 
 class LMStudioConfig(BaseModel):
-    base_url: str = "http://10.5.0.2:1234/v1"
+    base_url: str = "http://100.127.32.115:1234/v1"
     api_key: str = "lm-studio"
 
 
@@ -52,7 +52,7 @@ class ReflectionConfig(BaseModel):
 
 class MemoryConfig(BaseModel):
     enabled: bool = True
-    embedding_base_url: str = "http://10.5.0.2:1234/v1"
+    embedding_base_url: str = "http://100.127.32.115:1234/v1"
     embedding_model: str = "text-embedding-nomic-embed-text-v1.5"
     top_k: int = 5
 
@@ -93,6 +93,7 @@ class Config(BaseModel):
     reflection: ReflectionConfig = Field(default_factory=ReflectionConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     pinchtab: PinchTabConfig = Field(default_factory=PinchTabConfig)
+    openrouter_api_key: str = "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"
 
 
 def load_config(path: str = "config.json") -> Config:

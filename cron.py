@@ -80,7 +80,7 @@ class CronScheduler:
             return 0
 
         try:
-            with open(cron_path) as f:
+            with open(cron_path, encoding="utf-8") as f:
                 raw = json.load(f)
         except (json.JSONDecodeError, OSError) as e:
             logger.error(f"Failed to load {CRON_FILE}: {e}")

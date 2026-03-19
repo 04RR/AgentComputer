@@ -820,6 +820,171 @@
     text-decoration: line-through;
   }
 
+  /* ── Plan Approval Card ── */
+  .plan-card {
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    border-radius: 12px;
+    margin: 8px 0;
+    overflow: hidden;
+  }
+  .plan-card-header {
+    padding: 12px 16px;
+    background: var(--accent-dim);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .plan-card-header .plan-icon {
+    font-size: 16px;
+  }
+  .plan-card-body {
+    padding: 16px;
+  }
+  .plan-card-body .plan-text {
+    font-size: 14px;
+    line-height: 1.6;
+    max-height: 400px;
+    overflow-y: auto;
+    margin-bottom: 16px;
+  }
+  .plan-card-body .plan-text p { margin: 0 0 0.6em 0; }
+  .plan-card-body .plan-text h1, .plan-card-body .plan-text h2, .plan-card-body .plan-text h3 {
+    margin: 0.8em 0 0.4em 0; line-height: 1.3;
+  }
+  .plan-card-body .plan-text h1:first-child, .plan-card-body .plan-text h2:first-child,
+  .plan-card-body .plan-text h3:first-child { margin-top: 0; }
+  .plan-card-body .plan-text ul, .plan-card-body .plan-text ol {
+    margin: 0.4em 0 0.6em 1.4em; padding: 0;
+  }
+  .plan-card-body .plan-text code {
+    font-family: var(--mono); font-size: 0.88em; background: var(--bg); padding: 2px 5px; border-radius: 4px;
+  }
+  .plan-card-body .plan-text pre {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px 12px; margin: 0.5em 0; overflow-x: auto; font-size: 12px; line-height: 1.5;
+  }
+  .plan-card-body .plan-text pre code { background: none; padding: 0; }
+  .plan-card-tasks {
+    margin-bottom: 16px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .plan-card-tasks .pct-header {
+    padding: 8px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: var(--surface2);
+  }
+  .plan-card-tasks .pct-list {
+    padding: 4px 0;
+  }
+  .plan-card-tasks .pct-item {
+    padding: 5px 12px;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .plan-card-tasks .pct-item.subtask { padding-left: 28px; }
+  .plan-card-tasks .pct-num {
+    color: var(--accent);
+    font-weight: 600;
+    font-family: var(--mono);
+    font-size: 11px;
+    min-width: 20px;
+  }
+  .plan-actions {
+    display: flex;
+    gap: 10px;
+    align-items: stretch;
+  }
+  .plan-actions .plan-btn {
+    padding: 10px 24px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: var(--sans);
+    border: none;
+    transition: all 0.15s;
+  }
+  .plan-btn.approve {
+    background: var(--accent);
+    color: white;
+    flex-shrink: 0;
+  }
+  .plan-btn.approve:hover { opacity: 0.85; }
+  .plan-btn.approve:disabled { opacity: 0.5; cursor: not-allowed; }
+  .plan-feedback-area {
+    flex: 1;
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+  }
+  .plan-feedback-area textarea {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 13px;
+    font-family: var(--sans);
+    padding: 10px 12px;
+    resize: none;
+    outline: none;
+  }
+  .plan-feedback-area textarea:focus { border-color: var(--accent); }
+  .plan-btn.suggest {
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+  .plan-btn.suggest:hover { border-color: var(--text-dim); }
+
+  /* ── Execution Progress Bar ── */
+  .exec-progress {
+    padding: 8px 14px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    display: none;
+    flex-shrink: 0;
+  }
+  .exec-progress.visible { display: block; }
+  .exec-progress-bar {
+    height: 4px;
+    background: var(--surface2);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 6px;
+  }
+  .exec-progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.3s ease;
+    width: 0%;
+  }
+  .exec-progress-text {
+    font-size: 11px;
+    color: var(--text-dim);
+    display: flex;
+    justify-content: space-between;
+  }
+  .exec-progress-text .exec-phase {
+    color: var(--accent);
+    font-weight: 600;
+  }
+
   /* Scrollbar */
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -867,6 +1032,13 @@
   <!-- Chat View -->
   <div id="chat-view">
     <div id="chat"></div>
+    <div id="exec-progress" class="exec-progress">
+      <div class="exec-progress-bar"><div class="exec-progress-fill" id="execProgressFill"></div></div>
+      <div class="exec-progress-text">
+        <span class="exec-phase" id="execPhase">Planning...</span>
+        <span id="execStats">0 / 0 tasks</span>
+      </div>
+    </div>
     <div id="task-panel">
       <div class="task-panel-header" onclick="toggleTaskPanel()">
         <div class="task-panel-title">
@@ -959,6 +1131,7 @@ let reconnectTimer = null;
 let currentAssistantRawText = '';
 let currentMode = 'bounded';
 let taskPanelCollapsed = false;
+let deepWorkPhase = null; // null, 'planning', 'awaiting_approval', 'executing'
 
 // ─── Markdown rendering ───
 marked.setOptions({
@@ -1032,7 +1205,9 @@ function handleEvent(data) {
       let thinkText;
       if (currentMode === 'deep_work' && data.max_iterations) {
         const tokensK = data.tokens_used ? Math.round(data.tokens_used / 1000) : 0;
-        thinkText = `Step ${data.iteration}/${data.max_iterations} | ${tokensK}k tokens`;
+        const phaseLabel = deepWorkPhase === 'executing' ? 'Executing' : 'Planning';
+        thinkText = `${phaseLabel} \u00b7 Step ${data.iteration}/${data.max_iterations} | ${tokensK}k tokens`;
+        updateExecPhase(phaseLabel);
       } else {
         thinkText = `Thinking (step ${data.iteration})...`;
       }
@@ -1068,10 +1243,28 @@ function handleEvent(data) {
 
     case 'task_update':
       renderTasks(data.tasks || []);
+      updateExecProgress(data.tasks || []);
+      break;
+
+    case 'plan_ready':
+      removeThinking();
+      deepWorkPhase = 'awaiting_approval';
+      updateExecPhase('Awaiting Approval');
+      showPlanCard(data.text, data.tasks || []);
+      busy = false;
+      sendBtn.disabled = false;
+      currentAssistantRawText = '';
+      if (data.usage && data.usage.total_tokens) {
+        addSystem(`Planning: ${data.iterations} iteration(s) | ${formatNumber(data.usage.total_tokens)} tokens`);
+      }
+      loadSessions();
       break;
 
     case 'mode_changed':
       currentMode = data.mode;
+      if (data.mode === 'bounded') {
+        deepWorkPhase = null;
+      }
       updateModeUI();
       break;
 
@@ -1081,6 +1274,10 @@ function handleEvent(data) {
       sendBtn.disabled = false;
       currentAssistantRawText = '';
       inputEl.focus();
+      if (data.mode === 'deep_work') {
+        deepWorkPhase = null;
+        updateExecPhase('Complete');
+      }
       if (data.usage && data.usage.total_tokens) {
         const modeTag = data.mode === 'deep_work' ? ' [deep work]' : '';
         addSystem(`${data.iterations} iteration(s) | ${formatNumber(data.usage.total_tokens)} tokens${modeTag}`);
@@ -1127,6 +1324,12 @@ function sendMessage() {
   sendBtn.disabled = true;
   currentAssistant = null;
   currentAssistantRawText = '';
+
+  // Track deep work phase on first message
+  if (currentMode === 'deep_work' && !deepWorkPhase) {
+    deepWorkPhase = 'planning';
+    updateExecPhase('Planning');
+  }
 }
 
 function addMessage(role, text) {
@@ -1306,6 +1509,7 @@ function newSession() {
   currentThinking = null;
   // Reset mode and clear stale task panel from previous session
   currentMode = 'bounded';
+  deepWorkPhase = null;
   updateModeUI();
   renderTasks([]);
   connect();
@@ -1499,31 +1703,47 @@ function renderModels(data) {
   document.getElementById('curModelName').textContent = current.model_id;
   document.getElementById('curProviderName').textContent = current.provider;
 
-  // Render provider sections
   const list = document.getElementById('modelList');
   list.innerHTML = '';
 
-  for (const [providerKey, provider] of Object.entries(data.providers)) {
+  // ── Pinned models section ──
+  if (data.pinned && data.pinned.length) {
     const section = document.createElement('div');
     section.className = 'provider-section';
-
-    let badgeHtml = '';
-    if (providerKey === 'lmstudio') {
-      const online = provider.reachable;
-      badgeHtml = `<span class="badge ${online ? 'online' : 'offline'}">${online ? 'online' : 'offline'}</span>`;
+    section.innerHTML = '<div class="provider-label">Pinned</div>';
+    for (const model of data.pinned) {
+      const isActive = current.provider === model.provider && current.model_id === model.id;
+      const item = document.createElement('div');
+      item.className = `model-item${isActive ? ' active' : ''}`;
+      const provTag = model.provider === 'lmstudio' ? 'LM' : 'OR';
+      item.innerHTML = `
+        <span class="model-name" title="${escapeHtml(model.id)}">${escapeHtml(model.name || model.id)}</span>
+        <span style="font-size:9px;color:var(--text-dim);flex-shrink:0">${provTag}</span>
+        ${isActive ? '<span class="model-check">\u2713</span>' : ''}
+      `;
+      if (!isActive) {
+        item.onclick = () => selectModel(model.provider, model.id);
+      }
+      section.appendChild(item);
     }
+    list.appendChild(section);
+  }
 
-    section.innerHTML = `<div class="provider-label">${escapeHtml(provider.name)} ${badgeHtml}</div>`;
-
-    if (providerKey === 'lmstudio' && !provider.reachable) {
+  // ── LM Studio section ──
+  const lms = data.providers.lmstudio;
+  if (lms) {
+    const section = document.createElement('div');
+    section.className = 'provider-section';
+    const online = lms.reachable;
+    section.innerHTML = `<div class="provider-label">LM Studio <span class="badge ${online ? 'online' : 'offline'}">${online ? 'online' : 'offline'}</span></div>`;
+    if (!online) {
       const note = document.createElement('div');
       note.style.cssText = 'padding:6px 10px; font-size:11px; color:var(--text-dim);';
       note.textContent = 'LM Studio not reachable';
       section.appendChild(note);
     }
-
-    for (const model of provider.models) {
-      const isActive = current.provider === providerKey && current.model_id === model.id;
+    for (const model of (lms.models || [])) {
+      const isActive = current.provider === 'lmstudio' && current.model_id === model.id;
       const item = document.createElement('div');
       item.className = `model-item${isActive ? ' active' : ''}`;
       item.innerHTML = `
@@ -1531,12 +1751,79 @@ function renderModels(data) {
         ${isActive ? '<span class="model-check">\u2713</span>' : ''}
       `;
       if (!isActive) {
-        item.onclick = () => selectModel(providerKey, model.id);
+        item.onclick = () => selectModel('lmstudio', model.id);
       }
       section.appendChild(item);
     }
+    list.appendChild(section);
+  }
+
+  // ── OpenRouter search section ──
+  const or = data.providers.openrouter;
+  if (or) {
+    const section = document.createElement('div');
+    section.className = 'provider-section';
+    section.innerHTML = '<div class="provider-label">OpenRouter</div>';
+
+    if (!or.searchable) {
+      const note = document.createElement('div');
+      note.style.cssText = 'padding:6px 10px; font-size:11px; color:var(--text-dim);';
+      note.textContent = 'OPENROUTER_API_KEY not set';
+      section.appendChild(note);
+    } else {
+      const searchWrap = document.createElement('div');
+      searchWrap.style.cssText = 'padding:4px 6px;';
+      searchWrap.innerHTML = `<input id="orModelSearch" type="text" placeholder="Search models..." style="width:100%;padding:6px 8px;font-size:12px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:5px;outline:none;font-family:var(--sans);">`;
+      section.appendChild(searchWrap);
+
+      const resultsDiv = document.createElement('div');
+      resultsDiv.id = 'orSearchResults';
+      section.appendChild(resultsDiv);
+
+      list.appendChild(section);
+
+      // Wire up search with debounce
+      const input = document.getElementById('orModelSearch');
+      let debounceTimer = null;
+      input.addEventListener('input', () => {
+        clearTimeout(debounceTimer);
+        const q = input.value.trim();
+        if (q.length < 2) { document.getElementById('orSearchResults').innerHTML = ''; return; }
+        debounceTimer = setTimeout(() => searchOpenRouterModels(q, current), 300);
+      });
+      return; // section already appended above
+    }
 
     list.appendChild(section);
+  }
+}
+
+async function searchOpenRouterModels(query, current) {
+  const resultsDiv = document.getElementById('orSearchResults');
+  resultsDiv.innerHTML = '<div style="padding:6px 10px;font-size:11px;color:var(--text-dim);">Searching...</div>';
+  try {
+    const resp = await fetch(`/api/models/search?q=${encodeURIComponent(query)}`);
+    const data = await resp.json();
+    resultsDiv.innerHTML = '';
+    if (!data.models.length) {
+      resultsDiv.innerHTML = '<div style="padding:6px 10px;font-size:11px;color:var(--text-dim);">No matches</div>';
+      return;
+    }
+    for (const model of data.models) {
+      const isActive = current.provider === 'openrouter' && current.model_id === model.id;
+      const item = document.createElement('div');
+      item.className = `model-item${isActive ? ' active' : ''}`;
+      item.innerHTML = `
+        <span class="model-name" title="${escapeHtml(model.id)}">${escapeHtml(model.name || model.id)}</span>
+        ${isActive ? '<span class="model-check">\u2713</span>' : ''}
+      `;
+      if (!isActive) {
+        item.onclick = () => selectModel('openrouter', model.id);
+      }
+      resultsDiv.appendChild(item);
+    }
+  } catch (e) {
+    resultsDiv.innerHTML = '<div style="padding:6px 10px;font-size:11px;color:var(--text-dim);">Search failed</div>';
   }
 }
 
@@ -1593,16 +1880,20 @@ function updateModeUI() {
   const labelBounded = document.getElementById('modeLabelBounded');
   const labelDeep = document.getElementById('modeLabelDeep');
   const taskPanel = document.getElementById('task-panel');
+  const execProgress = document.getElementById('exec-progress');
 
   toggle.checked = currentMode === 'deep_work';
   labelBounded.classList.toggle('active', currentMode === 'bounded');
   labelDeep.classList.toggle('active', currentMode === 'deep_work');
 
-  // Show/hide task panel
+  // Show/hide task panel and progress bar
   if (currentMode === 'deep_work') {
     taskPanel.classList.add('visible');
+    execProgress.classList.add('visible');
   } else {
     taskPanel.classList.remove('visible');
+    execProgress.classList.remove('visible');
+    deepWorkPhase = null;
   }
 }
 
@@ -1667,6 +1958,115 @@ async function loadSessionTasks() {
   } catch (e) {
     console.error('Failed to load tasks:', e);
   }
+}
+
+// ─── Plan Approval ───
+function showPlanCard(planText, tasks) {
+  const card = document.createElement('div');
+  card.className = 'plan-card';
+  card.id = 'planCard';
+
+  // Build task list HTML
+  let taskHtml = '';
+  if (tasks.length > 0) {
+    const topLevel = tasks.filter(t => t.parent_id == null);
+    const childrenMap = {};
+    for (const t of tasks) {
+      if (t.parent_id != null) {
+        if (!childrenMap[t.parent_id]) childrenMap[t.parent_id] = [];
+        childrenMap[t.parent_id].push(t);
+      }
+    }
+    let items = '';
+    for (const t of topLevel) {
+      items += `<div class="pct-item"><span class="pct-num">${t.id}</span><span>${escapeHtml(t.title)}</span></div>`;
+      for (const c of (childrenMap[t.id] || [])) {
+        items += `<div class="pct-item subtask"><span class="pct-num">${t.id}.${c.id}</span><span>${escapeHtml(c.title)}</span></div>`;
+      }
+    }
+    taskHtml = `<div class="plan-card-tasks"><div class="pct-header">Task Breakdown (${tasks.length})</div><div class="pct-list">${items}</div></div>`;
+  }
+
+  card.innerHTML = `
+    <div class="plan-card-header">
+      <span class="plan-icon">&#128203;</span>
+      Plan Ready for Review
+    </div>
+    <div class="plan-card-body">
+      <div class="plan-text">${renderMarkdown(planText || 'No plan text provided.')}</div>
+      ${taskHtml}
+      <div class="plan-actions">
+        <button class="plan-btn approve" onclick="approvePlan()" id="planApproveBtn">Approve &amp; Execute</button>
+        <div class="plan-feedback-area">
+          <textarea id="planFeedback" placeholder="Suggest changes to the plan..." rows="1"></textarea>
+          <button class="plan-btn suggest" onclick="revisePlan()">Send Feedback</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  chatEl.appendChild(card);
+  scrollToBottom();
+}
+
+function approvePlan() {
+  if (!ws || ws.readyState !== 1) return;
+  const btn = document.getElementById('planApproveBtn');
+  if (btn) btn.disabled = true;
+
+  // Remove plan card
+  const card = document.getElementById('planCard');
+  if (card) {
+    card.querySelector('.plan-actions').innerHTML = '<div style="color:var(--green); font-size:13px; font-weight:600; padding:8px 0;">Plan approved — executing...</div>';
+  }
+
+  deepWorkPhase = 'executing';
+  busy = true;
+  sendBtn.disabled = true;
+  updateExecPhase('Executing');
+
+  const feedback = document.getElementById('planFeedback')?.value?.trim() || '';
+  ws.send(JSON.stringify({ type: 'approve_plan', feedback }));
+}
+
+function revisePlan() {
+  if (!ws || ws.readyState !== 1) return;
+  const textarea = document.getElementById('planFeedback');
+  const feedback = textarea?.value?.trim();
+  if (!feedback) return;
+
+  // Remove plan card and show user feedback as message
+  const card = document.getElementById('planCard');
+  if (card) card.remove();
+
+  addMessage('user', feedback);
+  busy = true;
+  sendBtn.disabled = true;
+  deepWorkPhase = 'planning';
+  updateExecPhase('Revising Plan');
+
+  ws.send(JSON.stringify({ type: 'revise_plan', feedback }));
+  if (textarea) textarea.value = '';
+}
+
+// ─── Execution Progress ───
+function updateExecProgress(tasks) {
+  if (currentMode !== 'deep_work' || !tasks.length) return;
+
+  const total = tasks.filter(t => t.parent_id != null).length || tasks.length;
+  const completed = tasks.filter(t => t.status === 'completed' && t.parent_id != null).length
+    || tasks.filter(t => t.status === 'completed').length;
+  const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+  const fill = document.getElementById('execProgressFill');
+  const stats = document.getElementById('execStats');
+  if (fill) fill.style.width = pct + '%';
+  if (stats) stats.textContent = `${completed} / ${total} tasks (${pct}%)`;
+}
+
+function updateExecPhase(phase) {
+  const el = document.getElementById('execPhase');
+  if (el) el.textContent = phase;
 }
 
 // ─── Input handlers ───

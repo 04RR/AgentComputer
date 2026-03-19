@@ -71,13 +71,19 @@ class Session:
         self._lock = asyncio.Lock()
         self.task_store = TaskStore(Path(storage_dir) / f"{session_id}.tasks.json")
         self.mode: str = "bounded"  # "bounded" or "deep_work"
+        self.deep_work_phase: str | None = None  # None, "planning", "executing"
+        # Incremental OpenAI message conversion cache
+        self._openai_cache: list[dict] = []
+        self._openai_cache_len: int = 0
+        # Buffered JSONL writes
+        self._write_buffer: list[str] = []
         self._load()
 
     def _load(self) -> None:
         if not self._storage_path.exists():
             return
         try:
-            with open(self._storage_path) as f:
+            with open(self._storage_path, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
@@ -95,9 +101,16 @@ class Session:
             logger.error(f"Failed to load session {self.session_id}: {e}")
 
     def _persist(self, message: Message) -> None:
+        self._write_buffer.append(message.to_jsonl() + "\n")
+
+    def flush(self) -> None:
+        """Write all buffered JSONL lines to disk at once."""
+        if not self._write_buffer:
+            return
         self._storage_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self._storage_path, "a") as f:
-            f.write(message.to_jsonl() + "\n")
+        with open(self._storage_path, "a", encoding="utf-8") as f:
+            f.writelines(self._write_buffer)
+        self._write_buffer.clear()
 
     def add_message(self, role: str, content: Any, **kwargs) -> Message:
         msg = Message(role=role, content=content, **kwargs)
@@ -106,16 +119,20 @@ class Session:
         return msg
 
     def get_openai_messages(self, max_messages: int | None = None) -> list[dict]:
-        """Get messages in OpenAI API format (excludes system — that's added separately)."""
-        api_messages = []
-        for msg in self.messages:
+        """Get messages in OpenAI API format (excludes system — that's added separately).
+
+        Uses incremental conversion: only converts new messages since last call.
+        """
+        # Convert only new messages
+        for msg in self.messages[self._openai_cache_len:]:
             if msg.role in ("user", "assistant", "tool"):
-                api_messages.append(msg.to_openai())
+                self._openai_cache.append(msg.to_openai())
+        self._openai_cache_len = len(self.messages)
 
-        if max_messages and len(api_messages) > max_messages:
-            api_messages = api_messages[-max_messages:]
+        if max_messages and len(self._openai_cache) > max_messages:
+            return list(self._openai_cache[-max_messages:])
 
-        return api_messages
+        return list(self._openai_cache)
 
     @property
     def lock(self) -> asyncio.Lock:
@@ -273,6 +290,10 @@ class Session:
 
         trimmed.extend(keep_tail)
         self.messages = trimmed
+        # Reset caches after compaction
+        self._openai_cache.clear()
+        self._openai_cache_len = 0
+        self._write_buffer.clear()  # Discard buffer — rewrite replaces the file
         self._rewrite_storage()
 
         logger.info(f"Compacted session {self.session_id}: kept {len(trimmed)} messages")
@@ -317,13 +338,16 @@ class Session:
     def _rewrite_storage(self) -> None:
         """Rewrite the JSONL file from the current (trimmed) messages."""
         self._storage_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self._storage_path, "w") as f:
+        with open(self._storage_path, "w", encoding="utf-8") as f:
             for msg in self.messages:
                 f.write(msg.to_jsonl() + "\n")
         logger.info(f"Rewrote storage for session {self.session_id}: {len(self.messages)} messages")
 
     def clear(self) -> None:
         self.messages.clear()
+        self._openai_cache.clear()
+        self._openai_cache_len = 0
+        self._write_buffer.clear()
         if self._storage_path.exists():
             self._storage_path.unlink()
         self.task_store.clear()

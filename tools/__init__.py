@@ -4,18 +4,53 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from pathlib import Path
 
 from tool_registry import Tool, ToolParam, ToolRegistry
+from memory_search import _parse_markdown_sections
 
 
-def register_builtin_tools(registry: ToolRegistry, workspace: str) -> None:
-    """Register all built-in tools."""
+def _is_allowed(name: str, allowed: list[str] | None) -> bool:
+    """Check if a tool name is in the allow list. None means allow all."""
+    return allowed is None or name in allowed
+
+
+def register_builtin_tools(registry: ToolRegistry, workspace: str, allowed: list[str] | None = None,
+                           tools_config=None) -> None:
+    """Register all built-in tools. If allowed is given, only register tools in the list."""
+
+    # Shell security settings from config
+    blocked_commands: list[str] = []
+    shell_allow_abs_paths: bool = False
+    if tools_config is not None:
+        blocked_commands = tools_config.shell_blocked_commands
+        shell_allow_abs_paths = tools_config.shell_allow_absolute_paths
+
+    workspace_resolved = str(Path(workspace).resolve())
 
     # ─── Shell Exec ───
 
     async def shell_exec(command: str, timeout: int = 30) -> str:
         """Execute a shell command and return stdout/stderr."""
+        # Check against blocked command patterns
+        cmd_lower = command.lower()
+        for pattern in blocked_commands:
+            if pattern.lower() in cmd_lower:
+                return json.dumps({"error": f"Command blocked: matches restricted pattern '{pattern}'"})
+
+        # Check for absolute paths outside workspace
+        if not shell_allow_abs_paths:
+            # Find path-like strings starting with / (Unix) that aren't the workspace
+            abs_paths = re.findall(r'(?:^|\s)(/[a-zA-Z0-9_./-]+)', command)
+            for abs_path in abs_paths:
+                resolved = str(Path(abs_path).resolve())
+                if not resolved.startswith(workspace_resolved):
+                    return json.dumps({
+                        "error": f"Command references absolute path '{abs_path}' outside the workspace. "
+                                 f"Set shell_allow_absolute_paths=true in config to override."
+                    })
+
         try:
             proc = await asyncio.create_subprocess_shell(
                 command,
@@ -33,15 +68,16 @@ def register_builtin_tools(registry: ToolRegistry, workspace: str) -> None:
         except asyncio.TimeoutError:
             return json.dumps({"error": f"Command timed out after {timeout}s"})
 
-    registry.register(Tool(
-        name="shell",
-        description="Execute a shell command. Use for running scripts, installing packages, system operations. Commands run in the agent workspace directory.",
-        params=[
-            ToolParam("command", "string", "The shell command to execute"),
-            ToolParam("timeout", "integer", "Timeout in seconds (default 30)", required=False),
-        ],
-        handler=shell_exec,
-    ))
+    if _is_allowed("shell", allowed):
+        registry.register(Tool(
+            name="shell",
+            description="Execute a shell command. Use for running scripts, installing packages, system operations. Commands run in the agent workspace directory.",
+            params=[
+                ToolParam("command", "string", "The shell command to execute"),
+                ToolParam("timeout", "integer", "Timeout in seconds (default 30)", required=False),
+            ],
+            handler=shell_exec,
+        ))
 
     # ─── Read File ───
 
@@ -49,6 +85,9 @@ def register_builtin_tools(registry: ToolRegistry, workspace: str) -> None:
         """Read a file and return its contents."""
         try:
             file_path = _resolve_path(path, workspace)
+        except PathTraversalError as e:
+            return json.dumps({"error": str(e)})
+        try:
             content = file_path.read_text(errors="replace")
             lines = content.splitlines()
             if len(lines) > max_lines:
@@ -57,15 +96,16 @@ def register_builtin_tools(registry: ToolRegistry, workspace: str) -> None:
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    registry.register(Tool(
-        name="read_file",
-        description="Read the contents of a file. Paths are relative to the workspace.",
-        params=[
-            ToolParam("path", "string", "File path (relative to workspace or absolute)"),
-            ToolParam("max_lines", "integer", "Maximum lines to return (default 500)", required=False),
-        ],
-        handler=read_file,
-    ))
+    if _is_allowed("read_file", allowed):
+        registry.register(Tool(
+            name="read_file",
+            description="Read the contents of a file. Paths are relative to the workspace.",
+            params=[
+                ToolParam("path", "string", "File path (relative to workspace or absolute)"),
+                ToolParam("max_lines", "integer", "Maximum lines to return (default 500)", required=False),
+            ],
+            handler=read_file,
+        ))
 
     # ─── Write File ───
 
@@ -73,26 +113,30 @@ def register_builtin_tools(registry: ToolRegistry, workspace: str) -> None:
         """Write content to a file."""
         try:
             file_path = _resolve_path(path, workspace)
+        except PathTraversalError as e:
+            return json.dumps({"error": str(e)})
+        try:
             file_path.parent.mkdir(parents=True, exist_ok=True)
             if mode == "append":
-                with open(file_path, "a") as f:
+                with open(file_path, "a", encoding="utf-8") as f:
                     f.write(content)
             else:
-                file_path.write_text(content)
+                file_path.write_text(content, encoding="utf-8")
             return json.dumps({"status": "ok", "path": str(file_path), "bytes": len(content)})
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    registry.register(Tool(
-        name="write_file",
-        description="Write content to a file. Creates parent directories if needed. Paths relative to workspace.",
-        params=[
-            ToolParam("path", "string", "File path to write to"),
-            ToolParam("content", "string", "Content to write"),
-            ToolParam("mode", "string", "Write mode: 'overwrite' or 'append'", required=False),
-        ],
-        handler=write_file,
-    ))
+    if _is_allowed("write_file", allowed):
+        registry.register(Tool(
+            name="write_file",
+            description="Write content to a file. Creates parent directories if needed. Paths relative to workspace.",
+            params=[
+                ToolParam("path", "string", "File path to write to"),
+                ToolParam("content", "string", "Content to write"),
+                ToolParam("mode", "string", "Write mode: 'overwrite' or 'append'", required=False),
+            ],
+            handler=write_file,
+        ))
 
     # ─── List Directory ───
 
@@ -100,6 +144,9 @@ def register_builtin_tools(registry: ToolRegistry, workspace: str) -> None:
         """List directory contents."""
         try:
             dir_path = _resolve_path(path, workspace)
+        except PathTraversalError as e:
+            return json.dumps({"error": str(e)})
+        try:
             if not dir_path.is_dir():
                 return json.dumps({"error": f"Not a directory: {path}"})
 
@@ -109,19 +156,23 @@ def register_builtin_tools(registry: ToolRegistry, workspace: str) -> None:
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    registry.register(Tool(
-        name="list_directory",
-        description="List files and directories. Paths relative to workspace.",
-        params=[
-            ToolParam("path", "string", "Directory path (default: workspace root)", required=False),
-            ToolParam("max_depth", "integer", "Max depth to recurse (default 2)", required=False),
-        ],
-        handler=list_directory,
-    ))
+    if _is_allowed("list_directory", allowed):
+        registry.register(Tool(
+            name="list_directory",
+            description="List files and directories. Paths relative to workspace.",
+            params=[
+                ToolParam("path", "string", "Directory path (default: workspace root)", required=False),
+                ToolParam("max_depth", "integer", "Max depth to recurse (default 2)", required=False),
+            ],
+            handler=list_directory,
+        ))
 
 
-def register_memory_search_tool(registry: ToolRegistry, memory_search_instance, workspace: str) -> None:
+def register_memory_search_tool(registry: ToolRegistry, memory_search_instance, workspace: str,
+                                allowed: list[str] | None = None) -> None:
     """Register the memory_search tool. Captures MemorySearch instance via closure."""
+    if not _is_allowed("memory_search", allowed):
+        return
 
     async def search_memory(query: str, top_k: int = 5) -> str:
         """Search long-term memory for relevant past knowledge and learnings."""
@@ -130,13 +181,15 @@ def register_memory_search_tool(registry: ToolRegistry, memory_search_instance, 
 
         top_k = max(1, min(top_k, 20))
 
+        # search_failed means the search itself errored and we should fall back.
+        # An empty list is a valid result meaning no memories matched.
+        search_failed = False
         try:
             results = memory_search_instance.search(query, top_k=top_k)
         except Exception:
-            # MemorySearch failed — fall back to keyword scan
-            results = None
+            search_failed = True
 
-        if results is None:
+        if search_failed:
             return _keyword_fallback(query, workspace)
 
         if not results:
@@ -169,8 +222,10 @@ def register_memory_search_tool(registry: ToolRegistry, memory_search_instance, 
     ))
 
 
-def register_task_tool(registry: ToolRegistry) -> None:
+def register_task_tool(registry: ToolRegistry, allowed: list[str] | None = None) -> None:
     """Register the manage_tasks tool for deep work mode."""
+    if not _is_allowed("manage_tasks", allowed):
+        return
 
     async def manage_tasks(action: str, task_id: int | None = None, title: str | None = None,
                            description: str | None = None, status: str | None = None,
@@ -214,20 +269,18 @@ def register_task_tool(registry: ToolRegistry) -> None:
         elif action == "complete":
             if task_id is None:
                 return json.dumps({"error": "task_id is required for complete"})
-            task = store.complete(task_id, result=result or "")
-            if not task:
+            complete_result = store.complete(task_id, result=result or "")
+            if complete_result is None:
                 return json.dumps({"error": f"Task {task_id} not found"})
-            # Check if completion was blocked by incomplete children
-            if getattr(task, "_completion_blocked", False):
-                child_ids = getattr(task, "_incomplete_children", [])
+            if not complete_result.success:
                 return json.dumps({
-                    "error": f"Cannot complete task {task_id} — it has {len(child_ids)} "
-                             f"incomplete subtask(s) (IDs: {child_ids}). "
+                    "error": f"Cannot complete task {task_id} — it has {len(complete_result.blocked_by)} "
+                             f"incomplete subtask(s) (IDs: {complete_result.blocked_by}). "
                              f"Complete all subtasks first, then complete the parent.",
-                    "task": task.to_dict(),
-                    "incomplete_subtasks": child_ids,
+                    "task": complete_result.task.to_dict(),
+                    "incomplete_subtasks": complete_result.blocked_by,
                 })
-            return json.dumps({"status": "completed", "task": task.to_dict()})
+            return json.dumps({"status": "completed", "task": complete_result.task.to_dict()})
 
         elif action == "delete":
             if task_id is None:
@@ -257,12 +310,27 @@ def register_task_tool(registry: ToolRegistry) -> None:
 
 # ─── Helpers ───
 
+class PathTraversalError(Exception):
+    """Raised when a path resolves outside the workspace."""
+
+
 def _resolve_path(path: str, workspace: str) -> Path:
-    """Resolve a path relative to workspace, or return absolute."""
+    """Resolve a path and verify it is inside the workspace.
+
+    Both relative and absolute paths are accepted, but the resolved result
+    must be within the workspace directory. Raises PathTraversalError otherwise.
+    """
+    workspace_root = Path(workspace).resolve()
     p = Path(path)
     if p.is_absolute():
-        return p
-    return Path(workspace) / p
+        resolved = p.resolve()
+    else:
+        resolved = (workspace_root / p).resolve()
+    if not resolved.is_relative_to(workspace_root):
+        raise PathTraversalError(
+            f"Path '{path}' resolves to '{resolved}' which is outside the workspace '{workspace_root}'"
+        )
+    return resolved
 
 
 def _walk(dir_path: Path, entries: list, root: Path, max_depth: int, depth: int) -> None:
@@ -305,11 +373,7 @@ def _keyword_fallback(query: str, workspace: str) -> str:
         path = memory_dir / fname
         if not path.exists():
             continue
-        sections = path.read_text(encoding="utf-8").split("\n## ")
-        for section in sections[1:]:
-            parts = section.split("\n", 1)
-            title = parts[0].strip()
-            body = parts[1].strip() if len(parts) > 1 else ""
+        for title, body in _parse_markdown_sections(path.read_text(encoding="utf-8")):
             full = (title + " " + body).lower()
             score = sum(1 for t in terms if t in full)
             if score > 0:

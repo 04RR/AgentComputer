@@ -20,7 +20,7 @@ from typing import Any, AsyncIterator
 from openai import AsyncOpenAI
 
 from config import Config
-from context import build_system_prompt, load_static_context
+from context import build_system_prompt, build_static_prompt_prefix, build_dynamic_suffix, load_static_context
 from session import Session
 from tool_registry import ToolRegistry
 
@@ -97,9 +97,9 @@ class AgentRuntime:
 
     def set_model(self, provider: str, model_id: str, base_url: str, api_key: str | None = None) -> None:
         """Switch the active model at runtime."""
-        # Save OpenRouter key the first time we see it
-        if self._openrouter_api_key is None and self.client.api_key and self.client.api_key != "placeholder":
-            self._openrouter_api_key = self.client.api_key
+        # Save any real API key so we can restore it when switching back to OpenRouter
+        if api_key and api_key not in ("placeholder", "lm-studio"):
+            self._openrouter_api_key = api_key
 
         self.agent_config.model.provider = provider
         self.agent_config.model.model_id = model_id
@@ -127,14 +127,26 @@ class AgentRuntime:
         # 1. Add user message to session
         session.add_message("user", user_message)
 
-        # 2. Determine limits based on mode
+        # 2. Determine limits based on mode and phase
+        is_planning = False
         if is_deep_work:
-            max_iterations = self.config.agent.deep_work.max_iterations
-            token_budget = self.config.agent.deep_work.token_budget
-            warning_threshold = self.config.agent.deep_work.warning_threshold
+            # Auto-transition: first message in deep work → planning phase
+            if session.deep_work_phase is None:
+                session.deep_work_phase = "planning"
+
+            is_planning = session.deep_work_phase == "planning"
+
+            if is_planning:
+                max_iterations = min(30, self.config.agent.deep_work.max_iterations)
+                token_budget = 0  # No budget enforcement during planning
+                warning_threshold = 0
+            else:
+                max_iterations = self.config.agent.deep_work.max_iterations
+                token_budget = self.config.agent.deep_work.token_budget
+                warning_threshold = self.config.agent.deep_work.warning_threshold
         else:
             max_iterations = self.agent_config.max_loop_iterations
-            token_budget = 0  # No budget enforcement in bounded mode
+            token_budget = 0
             warning_threshold = 0
 
         # 3. Build tool context for this run (replaces global task store binding)
@@ -170,29 +182,48 @@ class AgentRuntime:
 
         session_summary = ""
 
-        # 7. Build initial system prompt
-        task_summary = session.task_store.summary() if is_deep_work else ""
-        pending_task_count = sum(
-            1 for t in session.task_store.list_all()
-            if t.status in ("pending", "in_progress")
-        ) if is_deep_work else 0
-        system_prompt = build_system_prompt(
-            self.agent_config.workspace,
-            self.agent_config.name,
-            mode=effective_mode,
-            task_summary=task_summary,
-            pending_task_count=pending_task_count,
-            context_file="",
-            relevant_memories=relevant_memories,
-            user_message=user_message,
-            tool_names=tool_name_list,
-            session_summary=session_summary,
-            **static_ctx,
-        )
+        # 7. Build system prompt — cache static prefix for deep work reuse
+        if is_deep_work:
+            static_prefix = build_static_prompt_prefix(
+                workspace=self.agent_config.workspace,
+                agent_name=self.agent_config.name,
+                mode=effective_mode,
+                deep_work_phase=session.deep_work_phase,
+                relevant_memories=relevant_memories,
+                tool_names=tool_name_list,
+                session_summary=session_summary,
+                **static_ctx,
+            )
+            task_summary = session.task_store.summary()
+            pending_task_count = session.task_store.pending_count()
+            suffix = build_dynamic_suffix(
+                task_summary=task_summary,
+                pending_task_count=pending_task_count,
+            )
+            system_prompt = static_prefix + ("\n\n" + suffix if suffix else "")
+        else:
+            static_prefix = ""
+            task_summary = ""
+            pending_task_count = 0
+            system_prompt = build_system_prompt(
+                self.agent_config.workspace,
+                self.agent_config.name,
+                mode=effective_mode,
+                relevant_memories=relevant_memories,
+                user_message=user_message,
+                tool_names=tool_name_list,
+                session_summary=session_summary,
+                max_iterations=max_iterations,
+                provider=self.agent_config.model.provider,
+                **static_ctx,
+            )
 
         # 8. Run the agentic loop
         iteration = 0
         consecutive_text_only = 0  # Safety valve: exit after 2 consecutive text-only responses
+        # Circuit breaker for repetitive tool calls (lmstudio only)
+        consecutive_same_tool = 0
+        last_tool_name: str | None = None
         run_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         context_file = ""  # Path to compacted context MD file (set after compaction)
         compaction_count = 0
@@ -203,13 +234,10 @@ class AgentRuntime:
             iteration += 1
             logger.info(f"Agent loop iteration {iteration}/{max_iterations} (mode={effective_mode})")
 
-            # Deep work: rebuild system prompt each iteration with fresh task summary + budget warning
+            # Deep work: rebuild dynamic suffix each iteration (static prefix is cached)
             if is_deep_work and iteration > 1:
                 task_summary = session.task_store.summary()
-                pending_task_count = sum(
-                    1 for t in session.task_store.list_all()
-                    if t.status in ("pending", "in_progress")
-                )
+                pending_task_count = session.task_store.pending_count()
                 budget_warning = ""
                 if token_budget > 0:
                     usage_ratio = run_usage["total_tokens"] / token_budget
@@ -224,23 +252,27 @@ class AgentRuntime:
                         )
                 # Update session summary every 10 iterations from completed tasks
                 if iteration % 10 == 0:
-                    completed = [t for t in session.task_store.list_all() if t.status == "completed"]
+                    completed = session.task_store.completed_list()
                     if completed:
                         session_summary = "Completed: " + "; ".join(t.title for t in completed[:20])
-                system_prompt = build_system_prompt(
-                    self.agent_config.workspace,
-                    self.agent_config.name,
-                    mode=effective_mode,
+                        # Rebuild static prefix with updated session summary
+                        static_prefix = build_static_prompt_prefix(
+                            workspace=self.agent_config.workspace,
+                            agent_name=self.agent_config.name,
+                            mode=effective_mode,
+                            deep_work_phase=session.deep_work_phase,
+                            relevant_memories=relevant_memories,
+                            tool_names=tool_name_list,
+                            session_summary=session_summary,
+                            **static_ctx,
+                        )
+                suffix = build_dynamic_suffix(
                     task_summary=task_summary,
                     budget_warning=budget_warning,
                     pending_task_count=pending_task_count,
                     context_file=context_file,
-                    relevant_memories=relevant_memories,
-                    user_message=user_message,
-                    tool_names=tool_name_list,
-                    session_summary=session_summary,
-                    **static_ctx,
                 )
+                system_prompt = static_prefix + ("\n\n" + suffix if suffix else "")
 
             # Emit thinking event (enhanced in deep-work mode)
             thinking_data: dict[str, Any] = {"iteration": iteration}
@@ -277,30 +309,31 @@ class AgentRuntime:
                     ),
                 })
                 # Rebuild system prompt with context_file reference
-                pending_task_count = sum(
-                    1 for t in session.task_store.list_all()
-                    if t.status in ("pending", "in_progress")
-                )
-                system_prompt = build_system_prompt(
-                    self.agent_config.workspace,
-                    self.agent_config.name,
-                    mode=effective_mode,
+                pending_task_count = session.task_store.pending_count()
+                # Reset openai message cache since messages were compacted
+                suffix = build_dynamic_suffix(
                     task_summary=task_summary,
                     pending_task_count=pending_task_count,
                     context_file=context_file,
-                    relevant_memories=relevant_memories,
-                    user_message=user_message,
-                    tool_names=tool_name_list,
-                    session_summary=session_summary,
-                    **static_ctx,
                 )
+                system_prompt = static_prefix + ("\n\n" + suffix if suffix else "")
 
             # Token budget enforcement (hard stop — safety net after compaction cap)
             if is_deep_work and token_budget > 0 and run_usage["total_tokens"] >= token_budget:
+                session.flush()
+                session.task_store.flush()
                 yield AgentEvent("error", {
                     "message": f"Token budget exhausted ({run_usage['total_tokens']:,}/{token_budget:,} tokens). Stopping.",
                 })
                 return
+
+            # Iteration warning for bounded mode on local models
+            if not is_deep_work and iteration >= max_iterations - 3 and self.agent_config.model.provider == "lmstudio":
+                nudge = (
+                    f"[SYSTEM: You have {max_iterations - iteration} iteration(s) remaining. "
+                    f"Stop using tools and provide your final answer NOW with the information you already have.]"
+                )
+                session.add_message("user", nudge)
 
             # Build messages for the API
             messages = [{"role": "system", "content": system_prompt}]
@@ -320,6 +353,8 @@ class AgentRuntime:
 
             except Exception as e:
                 logger.error(f"OpenRouter API error: {e}")
+                session.flush()
+                session.task_store.flush()
                 yield AgentEvent("error", {"message": f"API error: {e}"})
                 return
 
@@ -346,7 +381,8 @@ class AgentRuntime:
                 # Save the assistant message with tool calls
                 session.add_message("assistant", _serialize_assistant_message(message))
 
-                # Execute each tool call
+                # Parse all tool calls upfront
+                parsed_calls = []
                 for tool_call in message.tool_calls:
                     fn = tool_call.function
                     tool_name = fn.name
@@ -354,13 +390,15 @@ class AgentRuntime:
                         tool_args = json.loads(fn.arguments) if fn.arguments else {}
                     except json.JSONDecodeError:
                         tool_args = {}
+                    parsed_calls.append((tool_call, tool_name, tool_args))
 
+                # Emit all tool_call events and broadcast activity
+                for tool_call, tool_name, tool_args in parsed_calls:
                     yield AgentEvent("tool_call", {
                         "tool": tool_name,
                         "input": tool_args,
                         "tool_call_id": tool_call.id,
                     })
-
                     _broadcast_activity({
                         "type": "tool_call",
                         "session_id": session.session_id,
@@ -369,12 +407,27 @@ class AgentRuntime:
                         "timestamp": time.time(),
                     })
 
-                    # Execute the tool with timing
-                    logger.info(f"Executing tool: {tool_name}({tool_args})")
-                    t0 = time.monotonic()
-                    result = await self.tools.execute(tool_name, tool_args, context=tool_context)
-                    duration_ms = round((time.monotonic() - t0) * 1000)
+                # Execute tool calls in parallel (defer task store saves during batch)
+                if is_deep_work:
+                    session.task_store._auto_save = False
 
+                async def _exec_tool(tc_name, tc_args):
+                    t0 = time.monotonic()
+                    res = await self.tools.execute(tc_name, tc_args, context=tool_context)
+                    dur = round((time.monotonic() - t0) * 1000)
+                    return res, dur
+
+                logger.info(f"Executing {len(parsed_calls)} tool(s) in parallel: {[n for _, n, _ in parsed_calls]}")
+                exec_results = await asyncio.gather(
+                    *(_exec_tool(name, args) for _, name, args in parsed_calls)
+                )
+
+                if is_deep_work:
+                    session.task_store._auto_save = True
+                    session.task_store.flush()
+
+                # Emit results and add to session in order
+                for (tool_call, tool_name, tool_args), (result, duration_ms) in zip(parsed_calls, exec_results):
                     success = not (result.startswith('{"error"') if isinstance(result, str) else False)
 
                     yield AgentEvent("tool_result", {
@@ -406,6 +459,24 @@ class AgentRuntime:
                             "summary": session.task_store.summary(),
                         })
 
+                # Flush buffered writes before next iteration
+                session.flush()
+
+                # Circuit breaker: detect repetitive same-tool calls (lmstudio only)
+                if self.agent_config.model.provider == "lmstudio":
+                    tool_names_this_iter = set(name for _, name, _ in parsed_calls)
+                    if len(tool_names_this_iter) == 1 and tool_names_this_iter.pop() == last_tool_name:
+                        consecutive_same_tool += 1
+                    else:
+                        consecutive_same_tool = 1
+                    last_tool_name = next(iter(set(name for _, name, _ in parsed_calls)))
+                    if consecutive_same_tool >= 3:
+                        session.add_message("user",
+                            "[SYSTEM: You have called the same tool multiple times consecutively. "
+                            "Synthesize the information you already have and respond to the user.]"
+                        )
+                        consecutive_same_tool = 0
+
                 # Loop continues — model will see tool results and decide next step
                 consecutive_text_only = 0  # Reset: model is actively using tools
                 continue
@@ -416,30 +487,49 @@ class AgentRuntime:
             if final_text:
                 session.add_message("assistant", final_text)
                 yield AgentEvent("text", {"text": final_text})
+                # Reset circuit breaker on text response
+                consecutive_same_tool = 0
+                last_tool_name = None
 
-            # Deep work: don't exit if there are still pending tasks
-            if is_deep_work:
-                pending = [t for t in session.task_store.list_all()
-                           if t.status in ("pending", "in_progress")]
-                if pending and consecutive_text_only < 4:
+            # Deep work execution phase: don't exit if there are still pending tasks
+            if is_deep_work and not is_planning:
+                pending_count_now = session.task_store.pending_count()
+                if pending_count_now > 0 and consecutive_text_only < 2:
                     consecutive_text_only += 1
                     logger.info(
-                        f"Deep work: text-only response but {len(pending)} tasks remain "
+                        f"Deep work: text-only response but {pending_count_now} tasks remain "
                         f"(consecutive_text_only={consecutive_text_only}). Injecting nudge."
                     )
-                    # Inject a nudge to get the model back on track
+                    pending_tasks = [t for t in session.task_store.list_all()
+                                     if t.status in ("pending", "in_progress")]
                     pending_titles = ", ".join(
-                        f"[{t.id}] {t.title}" for t in pending[:5]
+                        f"[{t.id}] {t.title}" for t in pending_tasks[:5]
                     )
                     nudge = (
-                        f"[SYSTEM: You have {len(pending)} pending/in-progress task(s): "
+                        f"[SYSTEM: You have {pending_count_now} pending/in-progress task(s): "
                         f"{pending_titles}. Do NOT ask the user — pick up the next task "
                         f"and continue working. Use tools to make progress.]"
                     )
                     session.add_message("user", nudge)
-                    continue  # Keep looping — model will see nudge and act
+                    continue
+
+            # Planning phase complete — emit plan_ready instead of done
+            if is_planning:
+                session.flush()
+                session.task_store.flush()
+                yield AgentEvent("plan_ready", {
+                    "text": final_text,
+                    "tasks": session.task_store.to_dict(),
+                    "summary": session.task_store.summary(),
+                    "iterations": iteration,
+                    "model": response.model,
+                    "usage": run_usage,
+                })
+                return
 
             # Exit normally (bounded mode, or no pending tasks, or safety valve hit)
+            session.flush()
+            session.task_store.flush()
             yield AgentEvent("done", {
                 "text": final_text,
                 "iterations": iteration,
@@ -451,9 +541,20 @@ class AgentRuntime:
             return
 
         # Hit max iterations
-        yield AgentEvent("error", {
-            "message": f"Agent loop hit max iterations ({max_iterations}). Stopping.",
-        })
+        session.flush()
+        session.task_store.flush()
+        if is_planning:
+            yield AgentEvent("plan_ready", {
+                "text": "Planning reached iteration limit. Here's what I have so far.",
+                "tasks": session.task_store.to_dict(),
+                "summary": session.task_store.summary(),
+                "iterations": iteration,
+                "usage": run_usage,
+            })
+        else:
+            yield AgentEvent("error", {
+                "message": f"Agent loop hit max iterations ({max_iterations}). Stopping.",
+            })
 
     async def run_simple(self, session: Session, user_message: str, mode: str | None = None) -> str:
         """Run the agent loop and return the final text response (non-streaming)."""

@@ -36,6 +36,24 @@ class MemoryResult:
     score: float
 
 
+def _parse_markdown_sections(text: str) -> list[tuple[str, str]]:
+    """Split markdown into (heading, body) pairs on ## headings."""
+    sections: list[tuple[str, str]] = []
+    heading = ""
+    lines: list[str] = []
+    for line in text.split("\n"):
+        if line.startswith("## "):
+            if heading:
+                sections.append((heading, "\n".join(lines).strip()))
+            heading = line[3:].strip()
+            lines = []
+        elif heading:
+            lines.append(line)
+    if heading:
+        sections.append((heading, "\n".join(lines).strip()))
+    return sections
+
+
 class MemorySearch:
     """Hybrid vector + keyword memory search backed by SQLite."""
 
@@ -156,7 +174,7 @@ class MemorySearch:
             path = self.memory_dir / fname
             if not path.exists():
                 continue
-            for i, (heading, body) in enumerate(self._parse_markdown_sections(path.read_text(encoding="utf-8"))):
+            for i, (heading, body) in enumerate(_parse_markdown_sections(path.read_text(encoding="utf-8"))):
                 sid = _slugify(heading) or f"{stype}_{i}"
                 if self.index_text(stype, sid, heading, body):
                     counts[stype] += 1
@@ -175,24 +193,6 @@ class MemorySearch:
 
         logger.info(f"Indexed {sum(counts.values())} new entries: {counts}")
         return counts
-
-    @staticmethod
-    def _parse_markdown_sections(text: str) -> list[tuple[str, str]]:
-        """Split markdown into (heading, body) pairs on ## headings."""
-        sections: list[tuple[str, str]] = []
-        heading = ""
-        lines: list[str] = []
-        for line in text.split("\n"):
-            if line.startswith("## "):
-                if heading:
-                    sections.append((heading, "\n".join(lines).strip()))
-                heading = line[3:].strip()
-                lines = []
-            elif heading:
-                lines.append(line)
-        if heading:
-            sections.append((heading, "\n".join(lines).strip()))
-        return sections
 
     # ── Embedding matrix ──
 

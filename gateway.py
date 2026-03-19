@@ -47,6 +47,15 @@ logger = logging.getLogger("agent_computer.gateway")
 config = load_config("config.json")
 logger.info(f"Loaded config: agent={config.agent.name}, model={config.agent.model.model_id}")
 
+
+def _get_openrouter_key() -> str:
+    """Resolve OpenRouter API key: agent cache → env var → config file."""
+    return (
+        agent._openrouter_api_key
+        or os.environ.get("OPENROUTER_API_KEY", "")
+        or config.openrouter_api_key
+    )
+
 # Tool registry
 tool_registry = ToolRegistry()
 allowed_tools = config.agent.tools.allow
@@ -109,7 +118,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_check_pinchtab())
     server_ready.set()
     # Pre-warm the OpenRouter model cache if an API key is available
-    or_api_key = agent._openrouter_api_key or os.environ.get("OPENROUTER_API_KEY", "")
+    or_api_key = _get_openrouter_key()
     if config.agent.model.provider == "openrouter" and or_api_key:
         asyncio.create_task(get_openrouter_models(or_api_key))
     yield
@@ -237,10 +246,43 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                             **event.data,
                         })
 
+            elif data.get("type") == "approve_plan":
+                # User approved the plan — transition to execution phase
+                session.deep_work_phase = "executing"
+                feedback = data.get("feedback", "")
+                approval_msg = "[PLAN APPROVED] Execute the plan now."
+                if feedback:
+                    approval_msg += f"\n\nAdditional notes from user: {feedback}"
+                logger.info(f"Plan approved for session={session_id}, transitioning to execution phase")
+                async with session.lock:
+                    async for event in agent.run(session, approval_msg, mode="deep_work"):
+                        await websocket.send_json({
+                            "type": event.type,
+                            **event.data,
+                        })
+
+            elif data.get("type") == "revise_plan":
+                # User wants to refine the plan — stay in planning phase
+                feedback = data.get("feedback", "").strip()
+                if not feedback:
+                    continue
+                logger.info(f"Plan revision requested for session={session_id}")
+                async with session.lock:
+                    async for event in agent.run(session, feedback, mode="deep_work"):
+                        await websocket.send_json({
+                            "type": event.type,
+                            **event.data,
+                        })
+
             elif data.get("type") == "set_mode":
                 new_mode = data.get("mode", "bounded")
                 if new_mode in ("bounded", "deep_work"):
                     session.mode = new_mode
+                    # Reset phase when mode changes
+                    if new_mode == "bounded":
+                        session.deep_work_phase = None
+                    elif session.deep_work_phase is None:
+                        session.deep_work_phase = None  # Will be set on first message
                     await websocket.send_json({
                         "type": "mode_changed",
                         "mode": new_mode,
@@ -450,28 +492,37 @@ async def get_openrouter_models(api_key: str, max_age_seconds: int = 3600) -> li
     return list(_OPENROUTER_FALLBACK_MODELS)
 
 
+_PINNED_MODELS = [
+    {"id": "z-ai/glm-5", "name": "GLM-5", "provider": "openrouter"},
+    {"id": "qwen/qwen3.5-35b-a3b", "name": "Qwen 3.5 35B A3B", "provider": "lmstudio"},
+]
+
+
 @app.get("/api/models")
 async def list_models():
     """List available models from all providers."""
-    api_key = agent._openrouter_api_key or os.environ.get("OPENROUTER_API_KEY", "")
+    api_key = _get_openrouter_key()
 
-    if api_key:
-        openrouter_models = await get_openrouter_models(api_key)
-        openrouter_info: dict = {"name": "OpenRouter", "models": openrouter_models}
-    else:
-        openrouter_info = {"name": "OpenRouter", "models": [], "note": "OPENROUTER_API_KEY not set"}
+    # Pre-warm OpenRouter cache in the background (don't block the response)
+    if api_key and not _openrouter_models_cache:
+        asyncio.create_task(get_openrouter_models(api_key))
 
     result = {
         "current": {
             "provider": config.agent.model.provider,
             "model_id": config.agent.model.model_id,
         },
+        "pinned": _PINNED_MODELS,
         "providers": {
-            "openrouter": openrouter_info,
             "lmstudio": {
                 "name": "LM Studio",
                 "models": [],
                 "reachable": False,
+            },
+            "openrouter": {
+                "name": "OpenRouter",
+                "searchable": bool(api_key),
+                "note": "" if api_key else "OPENROUTER_API_KEY not set",
             },
         },
     }
@@ -494,6 +545,19 @@ async def list_models():
     return JSONResponse(result)
 
 
+@app.get("/api/models/search")
+async def search_models(q: str = Query("", min_length=1)):
+    """Search OpenRouter models by name/id. Returns top 20 matches."""
+    api_key = _get_openrouter_key()
+    if not api_key:
+        return JSONResponse({"models": [], "note": "OPENROUTER_API_KEY not set"})
+
+    all_models = await get_openrouter_models(api_key)
+    query = q.lower()
+    matches = [m for m in all_models if query in m["id"].lower() or query in m["name"].lower()]
+    return JSONResponse({"models": matches[:20], "query": q})
+
+
 @app.post("/api/models/select")
 async def select_model(body: dict):
     """Switch the active model.
@@ -510,7 +574,9 @@ async def select_model(body: dict):
         api_key = config.lmstudio.api_key
     elif provider == "openrouter":
         base_url = "https://openrouter.ai/api/v1"
-        api_key = agent._openrouter_api_key or os.environ.get("OPENROUTER_API_KEY", "")
+        api_key = _get_openrouter_key()
+        if not api_key:
+            logger.warning("OpenRouter selected but no API key found (agent._openrouter_api_key and OPENROUTER_API_KEY env var are both empty)")
     else:
         raise HTTPException(400, f"Unknown provider: {provider}")
 
@@ -584,20 +650,23 @@ async def root():
 
 def main():
     provider = config.agent.model.provider
-    api_key = os.environ.get("OPENROUTER_API_KEY")
+    api_key = os.environ.get("OPENROUTER_API_KEY") or config.openrouter_api_key
+
+    # Always store the OpenRouter key on the agent so model switching works
+    if api_key:
+        agent._openrouter_api_key = api_key
 
     if provider == "lmstudio":
         # LM Studio uses its own base_url and api_key from config
         agent.client.api_key = config.lmstudio.api_key
-        if api_key:
-            agent._openrouter_api_key = api_key
         logger.info("Using LM Studio as provider (OPENROUTER_API_KEY is optional)")
     elif api_key:
         agent.client.api_key = api_key
     else:
-        logger.error("OPENROUTER_API_KEY environment variable not set!")
+        logger.error("No OpenRouter API key found (checked OPENROUTER_API_KEY env var and config.json openrouter_api_key)")
         logger.error("Get your key at https://openrouter.ai/keys")
-        logger.error("Then: export OPENROUTER_API_KEY=sk-or-...")
+        logger.error("Then set it in config.json: \"openrouter_api_key\": \"sk-or-...\"")
+        logger.error("Or via env var: set OPENROUTER_API_KEY=sk-or-...")
         logger.error("Or switch to LM Studio by setting provider to 'lmstudio' in config.json")
         return
 

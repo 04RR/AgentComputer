@@ -16,7 +16,10 @@
       "Bash(grep:*)",
       "Bash(echo exit: $?:*)",
       "Bash(git:*)",
-      "mcp__ide__getDiagnostics"
+      "mcp__ide__getDiagnostics",
+      "Bash(ssh:*)",
+      "Bash(find:*)",
+      "Bash(playwright install chromium)"
     ]
   }
 }

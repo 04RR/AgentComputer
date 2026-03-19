@@ -11,69 +11,69 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger("agent_computer.context")
 
-DEEP_WORK_INSTRUCTIONS = """
-## Deep Work Mode — MANDATORY WORKFLOW
+DEEP_WORK_PLANNING_INSTRUCTIONS = """
+## Deep Work Mode — PLANNING PHASE
 
-You are in **deep work mode**. You MUST follow this exact workflow. Do NOT skip steps.
+You are in **deep work mode, planning phase**. Your job is to research the request and produce
+an actionable plan for the user to review before execution begins.
 
-### PHASE 1: PLAN (mandatory — do this BEFORE any real work)
-
-Your FIRST tool calls MUST be `manage_tasks` calls to decompose the request. Do NOT call any
-other tool (shell, read_file, web_fetch, etc.) until you have created a full task breakdown.
-
-**Decomposition rules:**
-- Create ONE parent task for the overall goal
-- Create SEPARATE subtasks for each distinct unit of work (one per item, one per file, one per entity)
-- Each subtask should be completable in 1-5 tool calls — if it needs more, split it further
-- Subtasks must be specific and actionable, not vague summaries of the whole request
-
-**Example — if asked "Research missing annual reports for the first 3 tickers and save to files":**
-
-```
-manage_tasks(action="create", title="Research missing annual reports for first 3 tickers")  → parent id=1
-manage_tasks(action="create", title="Identify missing data years for ABB", parent_id=1)     → id=2
-manage_tasks(action="create", title="Identify missing data years for ADANIENT", parent_id=1) → id=3
-manage_tasks(action="create", title="Identify missing data years for ADANIGREEN", parent_id=1) → id=4
-manage_tasks(action="create", title="Research ABB missing data & save files", parent_id=1)   → id=5
-manage_tasks(action="create", title="Research ADANIENT missing data & save files", parent_id=1) → id=6
-manage_tasks(action="create", title="Research ADANIGREEN missing data & save files", parent_id=1) → id=7
-```
-
-BAD decomposition (too coarse — do NOT do this):
-```
-manage_tasks(action="create", title="Research missing data for first 3 tickers")  → only 1 task!
-```
-
-### PHASE 2: EXECUTE (work through subtasks one by one)
-
-- Before starting a subtask: `manage_tasks(action="update", task_id=X, status="in_progress")`
-- Do the actual work (shell, read_file, web_fetch, write_file, etc.)
-- After finishing: `manage_tasks(action="complete", task_id=X, result="brief summary of what was done")`
-- Move to the next pending subtask
-
-### PHASE 3: REVIEW (after all subtasks done)
-
-- `manage_tasks(action="list")` — verify everything is completed
-- Self-check your work: re-read files you created, verify outputs
-- Mark the parent task complete with a summary
-- Then give your final response to the user
+### What to do:
+1. **Understand the request** — read relevant files, explore the codebase, check APIs, gather context
+   - TIP: When researching, batch your web_fetch/read_file calls in one response to run in parallel
+2. **Identify the approach** — figure out the best strategy, tools needed, potential risks
+3. **Create a task breakdown** using `manage_tasks`:
+   - Create ONE parent task for the overall goal
+   - Create SEPARATE subtasks for each distinct unit of work
+   - Each subtask should be completable in 1-5 tool calls
+   - Subtasks must be specific and actionable
+4. **Present your plan** as a clear, structured text response:
+   - **Goal**: One-line summary
+   - **Strategy**: Your approach and key decisions
+   - **Tasks**: The numbered task breakdown with brief descriptions
+   - **Risks/Notes**: Anything the user should know
 
 ### Rules:
-- NEVER do real work before creating your task breakdown
-- NEVER lump multiple items/entities into a single task — one task per item
+- DO use tools (read_file, shell, web_fetch) to research — don't guess
+- DO create tasks via `manage_tasks` so they're tracked
+- Do NOT start executing the actual work — only research and plan
+- Do NOT ask vague questions — make decisions and note assumptions in your plan
+- Your final response should be a complete plan ready for the user to approve or refine
+"""
+
+DEEP_WORK_EXECUTION_INSTRUCTIONS = """
+## Deep Work Mode — EXECUTION PHASE
+
+The user has approved your plan. Execute it now.
+
+### WORKFLOW:
+1. **Execute tasks one by one:**
+   - Before starting: `manage_tasks(action="update", task_id=X, status="in_progress")`
+   - Do the actual work (shell, read_file, web_fetch, write_file, etc.)
+     * Within a task, batch MULTIPLE independent tool calls in one response
+       (e.g., fetch 5 URLs at once - they run in parallel via asyncio.gather)
+   - After finishing: `manage_tasks(action="complete", task_id=X, result="brief summary")`
+   - Move to the next pending subtask
+
+2. **Review when all subtasks are done:**
+   - `manage_tasks(action="list")` — verify everything is completed
+   - Self-check your work: re-read files you created, verify outputs
+   - Mark the parent task complete with a summary
+
+### Rules:
 - Review the task list every 5-10 iterations to reorient
 - If blocked on a task, mark it "blocked" and move to the next one
 
 ### CRITICAL RULES — NEVER VIOLATE THESE:
-- **NEVER ask "Would you like me to proceed?" or "Shall I continue?" or "What would you like me to do next?"** — you are FULLY autonomous. Keep working until ALL tasks are done.
-- **NEVER stop to summarize progress mid-way** — just keep executing tasks. Only give a final summary when ALL tasks are done.
-- **NEVER re-analyze data you already processed** — check your task list. If a task is "completed", its work is done. Move to the next "pending" task.
-- **NEVER complete a parent task before ALL its subtasks are completed** — the system will block this. Complete subtasks first, then the parent.
-- **NEVER produce a text-only response while tasks remain** — if you have pending tasks, your next action MUST be a tool call. Text-only responses waste iterations.
-- If you return text without calling any tool, the loop will continue automatically. Use tools to make progress, not words.
-- Do NOT confirm before destructive operations — in deep work mode you have full autonomy to act.
-- After completing one subtask, IMMEDIATELY start the next pending subtask. Do not pause, summarize, or ask.
+- **NEVER ask "Would you like me to proceed?" or "Shall I continue?"** — you are FULLY autonomous. Keep working until ALL tasks are done.
+- **NEVER stop to summarize progress mid-way** — just keep executing tasks.
+- **NEVER re-analyze data you already processed** — if a task is "completed", move on.
+- **NEVER complete a parent task before ALL its subtasks are completed.**
+- **NEVER produce a text-only response while tasks remain** — use tools to make progress.
+- After completing one subtask, IMMEDIATELY start the next. Do not pause or ask.
 """
+
+# Legacy combined instructions (kept for backward compatibility if needed)
+DEEP_WORK_INSTRUCTIONS = DEEP_WORK_PLANNING_INSTRUCTIONS
 
 
 def load_static_context(workspace: str) -> dict:
@@ -109,56 +109,62 @@ def load_static_context(workspace: str) -> dict:
     return result
 
 
-def build_system_prompt(
+def build_static_prompt_prefix(
     workspace: str,
     agent_name: str,
     mode: str = "bounded",
-    task_summary: str = "",
-    budget_warning: str = "",
-    pending_task_count: int = 0,
-    context_file: str = "",
+    deep_work_phase: str | None = None,
     relevant_memories: list[dict] | None = None,
-    user_message: str = "",
     tool_names: list[str] | None = None,
-    session_summary: str = "",
     soul_content: str = "",
     user_content: str = "",
     static_memory_fallback: str = "",
+    session_summary: str = "",
+    max_iterations: int | None = None,
+    provider: str | None = None,
 ) -> str:
-    """Assemble the system prompt. Pure function — no file I/O.
+    """Assemble the static parts of the system prompt (parts 1-7).
 
-    Assembly order:
-    1. Base identity
-    2. SOUL.md content
-    3. USER.md content
-    4. Tool inventory
-    5. Relevant memories (or static fallback)
-    6. Session context
-    7. Deep work instructions (if deep_work mode)
-    8. Task state
-    9. Budget warning
-    10. Archived context
+    These don't change between iterations within a single deep work run.
     """
     parts: list[str] = []
 
-    # 1. Base identity (lean — detailed rules belong in SOUL.md)
+    # 1. Base identity
     now = datetime.now(timezone.utc).strftime("%A, %B %d, %Y %H:%M UTC")
     parts.append(f"""You are {agent_name}, a personal AI assistant powered by agent_computer.
 Current date/time: {now}
 Workspace directory: {workspace}
 
 You are an autonomous agent running in an agentic loop with tool access.
-Think step-by-step. Be concise. If a tool call fails, try an alternative approach.""")
+Think step-by-step. Be concise. If a tool call fails, try an alternative approach.
 
-    # 2. SOUL.md — personality, rules, boundaries
+IMPORTANT: You can make MULTIPLE tool calls in a SINGLE response when operations are independent.
+Examples of when to batch:
+- Research: Fetch multiple URLs at once (web_fetch in parallel)
+- File operations: Read several files simultaneously
+- Data gathering: Query multiple sources concurrently
+
+Batched tool calls execute in parallel for faster results. Only make sequential calls when
+one operation depends on another's output.""")
+
+    # 1.5. Efficiency rules for bounded mode on local models
+    if mode != "deep_work" and provider == "lmstudio" and max_iterations is not None:
+        parts.append(f"""## Efficiency Rules
+- You have a HARD LIMIT of {max_iterations} total steps. Plan accordingly.
+- Make MULTIPLE tool calls in a SINGLE response when possible (they run in parallel).
+- For web research: fetch 2-3 URLs in ONE response, not one at a time.
+- After gathering information, STOP fetching and give your answer. Do NOT keep searching for marginally better results.
+- If you have enough information to answer the user, ANSWER IMMEDIATELY.""")
+
+    # 2. SOUL.md
     if soul_content:
         parts.append(f"<agent_identity_&_rules>\n{soul_content}\n</agent_identity_&_rules>")
 
-    # 3. USER.md — user context, preferences, project info
+    # 3. USER.md
     if user_content:
         parts.append(f"<user_context>\n{user_content}\n</user_context>")
 
-    # 4. Tool inventory — natural language summary of capabilities
+    # 4. Tool inventory
     if tool_names:
         tool_list = ", ".join(tool_names)
         parts.append(
@@ -167,7 +173,24 @@ Think step-by-step. Be concise. If a tool call fails, try an alternative approac
             "</available_tools>"
         )
 
-    # 5. Relevant memories (query-aware) or static fallback
+    # 4.5. Parallel tool usage examples (deep work mode only)
+    if mode == "deep_work":
+        parts.append("""<parallel_tool_examples>
+GOOD - Batched (1 iteration):
+Call web_fetch("url1"), web_fetch("url2"), web_fetch("url3") in ONE response
+→ Runtime executes in parallel → All results returned together
+
+BAD - Sequential (3 iterations):
+Call web_fetch("url1") → wait → response → next iteration
+Call web_fetch("url2") → wait → response → next iteration
+Call web_fetch("url3") → wait → response → next iteration
+
+When NOT to batch:
+- Operations depending on each other (read config → use config values)
+- State modifications (write file → read it back)
+</parallel_tool_examples>""")
+
+    # 5. Relevant memories
     if relevant_memories:
         mem_lines = []
         for m in relevant_memories:
@@ -186,40 +209,106 @@ Think step-by-step. Be concise. If a tool call fails, try an alternative approac
     elif static_memory_fallback:
         parts.append(static_memory_fallback)
 
-    # 6. Session context — helps maintain coherence in long conversations
+    # 6. Session context
     if session_summary:
         parts.append(f"<session_context>\nThis session so far: {session_summary}\n</session_context>")
 
-    # 7. Deep work instructions (unchanged)
+    # 7. Deep work instructions (phase-aware)
     if mode == "deep_work":
-        parts.append(DEEP_WORK_INSTRUCTIONS)
-
-        # 8. Task state
-        if task_summary:
-            resume_hint = ""
-            if pending_task_count > 0:
-                resume_hint = (
-                    f"\n\nYou have {pending_task_count} task(s) still to do. "
-                    "Pick up the next pending task immediately — call a tool, do NOT produce a text-only response."
-                )
-            parts.append(f"<current_tasks>\n{task_summary}{resume_hint}\n</current_tasks>")
-
-        # 9. Budget warning
-        if budget_warning:
-            parts.append(f"<budget_warning>\n{budget_warning}\n</budget_warning>")
-
-        # 10. Archived context
-        if context_file:
-            parts.append(
-                f"<archived_context>\n"
-                f"Your conversation was auto-compacted to save tokens. "
-                f"Full prior context is saved at:\n{context_file}\n"
-                f"Use `read_file` to review earlier work if needed. "
-                f"Your task list is the source of truth for progress.\n"
-                f"</archived_context>"
-            )
+        if deep_work_phase == "executing":
+            parts.append(DEEP_WORK_EXECUTION_INSTRUCTIONS)
+        else:
+            parts.append(DEEP_WORK_PLANNING_INSTRUCTIONS)
 
     return "\n\n".join(parts)
+
+
+def build_dynamic_suffix(
+    task_summary: str = "",
+    budget_warning: str = "",
+    pending_task_count: int = 0,
+    context_file: str = "",
+) -> str:
+    """Assemble the dynamic parts of the system prompt (parts 8-10).
+
+    These change per iteration in deep work mode.
+    """
+    parts: list[str] = []
+
+    # 8. Task state
+    if task_summary:
+        resume_hint = ""
+        if pending_task_count > 0:
+            resume_hint = (
+                f"\n\nYou have {pending_task_count} task(s) still to do. "
+                "Pick up the next pending task immediately — call a tool, do NOT produce a text-only response."
+            )
+        parts.append(f"<current_tasks>\n{task_summary}{resume_hint}\n</current_tasks>")
+
+    # 9. Budget warning
+    if budget_warning:
+        parts.append(f"<budget_warning>\n{budget_warning}\n</budget_warning>")
+
+    # 10. Archived context
+    if context_file:
+        parts.append(
+            f"<archived_context>\n"
+            f"Your conversation was auto-compacted to save tokens. "
+            f"Full prior context is saved at:\n{context_file}\n"
+            f"Use `read_file` to review earlier work if needed. "
+            f"Your task list is the source of truth for progress.\n"
+            f"</archived_context>"
+        )
+
+    return "\n\n".join(parts)
+
+
+def build_system_prompt(
+    workspace: str,
+    agent_name: str,
+    mode: str = "bounded",
+    task_summary: str = "",
+    budget_warning: str = "",
+    pending_task_count: int = 0,
+    context_file: str = "",
+    relevant_memories: list[dict] | None = None,
+    user_message: str = "",
+    tool_names: list[str] | None = None,
+    session_summary: str = "",
+    soul_content: str = "",
+    user_content: str = "",
+    static_memory_fallback: str = "",
+    max_iterations: int | None = None,
+    provider: str | None = None,
+) -> str:
+    """Assemble the full system prompt. Pure function — no file I/O.
+
+    Backward-compatible wrapper that calls build_static_prompt_prefix + build_dynamic_suffix.
+    """
+    prefix = build_static_prompt_prefix(
+        workspace=workspace,
+        agent_name=agent_name,
+        mode=mode,
+        relevant_memories=relevant_memories,
+        tool_names=tool_names,
+        soul_content=soul_content,
+        user_content=user_content,
+        static_memory_fallback=static_memory_fallback,
+        session_summary=session_summary,
+        max_iterations=max_iterations,
+        provider=provider,
+    )
+
+    suffix = build_dynamic_suffix(
+        task_summary=task_summary,
+        budget_warning=budget_warning,
+        pending_task_count=pending_task_count,
+        context_file=context_file,
+    )
+
+    if suffix:
+        return prefix + "\n\n" + suffix
+    return prefix
 
 
 def estimate_tokens(text: str) -> int:
