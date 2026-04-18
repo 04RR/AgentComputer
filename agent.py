@@ -27,6 +27,16 @@ from tool_registry import ToolRegistry
 
 logger = logging.getLogger("agent_computer.agent")
 
+# Tools the agent is allowed to use during the deep-work planning phase.
+# Research/lookup only — nothing with side effects or deep content fetches.
+PLANNING_TOOLS = {
+    "manage_tasks",    # primary planning tool
+    "memory_search",   # read-only: past context
+    "read_file",       # read-only
+    "list_directory",  # read-only
+    "web_search",      # read-only lookup (fetching full pages waits for execution)
+}
+
 # ─── Activity broadcasting ───
 _activity_log: deque[dict] = deque(maxlen=200)
 _activity_listeners: list[asyncio.Queue] = []
@@ -159,10 +169,15 @@ class AgentRuntime:
             "session_id": session.session_id,
         }
 
-        # 4. Build tool schemas — filter manage_tasks out in bounded mode
+        # 4. Build tool schemas — filter by mode and deep-work phase
         allowed_tools = list(self.agent_config.tools.allow)
         if not is_deep_work and "manage_tasks" in allowed_tools:
             allowed_tools.remove("manage_tasks")
+        if is_planning:
+            # Planning phase: restrict to research/lookup tools only.
+            # Write tools (write_file, shell) and deep-fetch tools (web_fetch*)
+            # are physically invisible until the user approves the plan.
+            allowed_tools = [t for t in allowed_tools if t in PLANNING_TOOLS]
         tool_schemas = self.tools.get_openai_tools(allowed=allowed_tools)
 
         # 5. Cache static context (read files once per run, not every iteration)
@@ -478,7 +493,10 @@ class AgentRuntime:
 
             if final_text:
                 session.add_message("assistant", final_text)
-                yield AgentEvent("text", {"text": final_text})
+                # During planning phase, don't stream the plan text to chat —
+                # it will be delivered via the plan_ready event as a dedicated card.
+                if not is_planning:
+                    yield AgentEvent("text", {"text": final_text})
                 # Reset circuit breaker on text response
                 consecutive_same_tool = 0
                 last_tool_name = None

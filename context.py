@@ -45,30 +45,37 @@ class PromptContext:
 DEEP_WORK_PLANNING_INSTRUCTIONS = """
 ## Deep Work Mode — PLANNING PHASE
 
-You are in **deep work mode, planning phase**. Your job is to research the request and produce
-an actionable plan for the user to review before execution begins.
+You are in the PLANNING phase of deep work mode. Your ONLY goal right now is to produce a
+plan the user can review and approve. You are NOT executing the task yet.
 
-### What to do:
-1. **Understand the request** — read relevant files, explore the codebase, check APIs, gather context
-   - TIP: When researching, batch your web_fetch/read_file calls in one response to run in parallel
-2. **Identify the approach** — figure out the best strategy, tools needed, potential risks
-3. **Create a task breakdown** using `manage_tasks`:
-   - Create ONE parent task for the overall goal
-   - Create SEPARATE subtasks for each distinct unit of work
-   - Each subtask should be completable in 1-5 tool calls
-   - Subtasks must be specific and actionable
-4. **Present your plan** as a clear, structured text response:
-   - **Goal**: One-line summary
-   - **Strategy**: Your approach and key decisions
-   - **Tasks**: The numbered task breakdown with brief descriptions
-   - **Risks/Notes**: Anything the user should know
+During planning, you MUST:
+- Understand what the user is asking for
+- Optionally do light research (web_search, read_file, list_directory, memory_search) to
+  inform your plan — only the tools listed below are available to you in this phase
+- Use `manage_tasks` to create a parent task and sub-tasks that decompose the work
+  * One parent task for the overall goal
+  * Separate sub-tasks for each distinct unit of work (each completable in 1-5 tool calls)
+  * Sub-tasks must be specific and actionable
+- Write a final summary message describing: **Goal**, **Strategy**, **Tasks**, and any
+  **Risks/Notes**
 
-### Rules:
-- DO use tools (read_file, shell, web_fetch) to research — don't guess
-- DO create tasks via `manage_tasks` so they're tracked
-- Do NOT start executing the actual work — only research and plan
-- Do NOT ask vague questions — make decisions and note assumptions in your plan
-- Your final response should be a complete plan ready for the user to approve or refine
+During planning, you MUST NOT:
+- Write, edit, or delete any files
+- Run shell commands of any kind
+- Fetch full web pages (use `web_search` to find sources; fetching happens during execution)
+- Produce the final answer to the user's question — that happens during EXECUTION,
+  after approval
+
+Even if the task seems simple enough to complete in one step, you must still plan it. The
+user has asked for a plan-first workflow. Do not skip ahead.
+
+The Completeness rules in your identity apply to the PLAN you produce — ensure your plan
+addresses all parts of the user's request, but do NOT execute any parts during planning.
+
+### Phase transition
+The phase will transition from PLANNING to AWAITING_APPROVAL once you produce a text response
+without further tool calls. After the user approves, you will enter the EXECUTION phase with
+access to all tools (shell, write_file, web_fetch, etc.).
 """
 
 DEEP_WORK_EXECUTION_INSTRUCTIONS = """

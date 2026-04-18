@@ -386,6 +386,7 @@
   }
   #input-area button:hover { opacity: 0.85; }
   #input-area button:disabled { opacity: 0.4; cursor: not-allowed; }
+  #input-area textarea:disabled { opacity: 0.5; cursor: not-allowed; }
 
   /* ── Dashboard view ── */
   #dashboard-view {
@@ -1347,7 +1348,9 @@ function handleEvent(data) {
       updateExecPhase('Awaiting Approval');
       showPlanCard(data.text, data.tasks || []);
       busy = false;
-      sendBtn.disabled = false;
+      sendBtn.disabled = true;
+      inputEl.disabled = true;
+      inputEl.placeholder = 'Approve or send feedback on the plan above to continue.';
       currentAssistantRawText = '';
       if (data.usage && data.usage.total_tokens) {
         addSystem(`Planning: ${data.iterations} iteration(s) | ${formatNumber(data.usage.total_tokens)} tokens`);
@@ -1367,6 +1370,8 @@ function handleEvent(data) {
       finalizeCurrentPanel();
       busy = false;
       sendBtn.disabled = false;
+      inputEl.disabled = false;
+      inputEl.placeholder = 'Type a message... (Enter to send, Shift+Enter for newline)';
       currentAssistantRawText = '';
       inputEl.focus();
       if (data.mode === 'deep_work') {
@@ -1385,6 +1390,8 @@ function handleEvent(data) {
       addSystem(`Error: ${data.message}`);
       busy = false;
       sendBtn.disabled = false;
+      inputEl.disabled = false;
+      inputEl.placeholder = 'Type a message... (Enter to send, Shift+Enter for newline)';
       break;
 
     case 'cleared':
@@ -1722,19 +1729,47 @@ async function switchSession(newSessionId) {
 }
 
 function renderHistory(messages) {
+  // Internal nudges the backend injects as role=user so the model sees them in
+  // context. They are NOT things the human typed — hide them from history.
+  const isInternalUserMsg = (content) => {
+    if (typeof content !== 'string') return false;
+    return content.startsWith('[PLAN APPROVED]') || content.startsWith('[SYSTEM:');
+  };
+
+  let panelIter = 0;
+
   for (const msg of messages) {
     if (msg.role === 'user') {
+      if (isInternalUserMsg(msg.content)) continue;
+      if (currentActivityPanel) finalizeCurrentPanel();
       addMessage('user', typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content));
     } else if (msg.role === 'assistant') {
       if (typeof msg.content === 'string') {
+        if (currentActivityPanel) finalizeCurrentPanel();
         addMessage('assistant', msg.content);
+      } else if (msg.content && typeof msg.content === 'object') {
+        // Assistant turn with tool_calls — open a panel and render each call.
+        const toolCalls = msg.content.tool_calls || [];
+        if (toolCalls.length > 0) {
+          panelIter += 1;
+          ensurePanel(panelIter, {});
+          for (const call of toolCalls) {
+            const fn = call.function || {};
+            let argsStr = fn.arguments || '';
+            if (typeof argsStr !== 'string') argsStr = JSON.stringify(argsStr);
+            if (argsStr.length > 400) argsStr = argsStr.slice(0, 400) + '\u2026';
+            addToolLine('call', fn.name || 'tool', argsStr);
+          }
+        }
       }
-      // Skip assistant messages that are just tool_calls containers (content is a dict)
     } else if (msg.role === 'tool') {
-      const preview = typeof msg.content === 'string' ? msg.content.substring(0, 300) : JSON.stringify(msg.content).substring(0, 300);
-      addToolEvent('result', msg.tool_name || 'tool', preview);
+      const raw = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+      const detail = raw.length > 500 ? raw.slice(0, 500) + '\u2026' : raw;
+      addToolLine('result', msg.tool_name || 'tool', detail);
     }
   }
+
+  if (currentActivityPanel) finalizeCurrentPanel();
 }
 
 async function deleteSession(sid) {
@@ -2277,6 +2312,8 @@ function approvePlan() {
   deepWorkPhase = 'executing';
   busy = true;
   sendBtn.disabled = true;
+  inputEl.disabled = false;
+  inputEl.placeholder = 'Type a message... (Enter to send, Shift+Enter for newline)';
   updateExecPhase('Executing');
 
   const feedback = document.getElementById('planFeedback')?.value?.trim() || '';
@@ -2296,6 +2333,8 @@ function revisePlan() {
   addMessage('user', feedback);
   busy = true;
   sendBtn.disabled = true;
+  inputEl.disabled = false;
+  inputEl.placeholder = 'Type a message... (Enter to send, Shift+Enter for newline)';
   deepWorkPhase = 'planning';
   updateExecPhase('Revising Plan');
 
