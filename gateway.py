@@ -20,7 +20,9 @@ from pathlib import Path
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
+import uuid
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, JSONResponse
 import httpx
 import uvicorn
@@ -68,6 +70,11 @@ register_web_search_tool(tool_registry, allowed=allowed_tools)
 if config.pinchtab.enabled:
     from tools.pinchtab import register_pinchtab_tools
     register_pinchtab_tools(tool_registry, config.agent.workspace, allowed=allowed_tools, pinchtab_config=config.pinchtab)
+# Verification-mode tools (Phase 1): registered unconditionally so the
+# /api/verify/raw endpoint can call them, but absent from agent.tools.allow
+# so the agent loop can't see them yet. Phase 2 will flip them on for agent use.
+from tools.verification import register_verification_tools
+register_verification_tools(tool_registry, config.agent.workspace, config.verification)
 tool_registry.set_approval_requirements(config.agent.tools.require_approval)
 
 # Load existing skills into registry
@@ -434,6 +441,69 @@ async def chat(session_id: str, body: dict):
         "response": response_text,
         "session_id": session_id,
         "mode": chat_mode or session.mode,
+    })
+
+
+# ─── Verification mode (Phase 1) ───
+
+@app.post("/api/verify/raw")
+async def verify_raw(image: UploadFile = File(...), caption: str = Form(...)):
+    """Run all three verification tools on an uploaded image + caption.
+
+    Phase 1 endpoint: bypasses the agent loop entirely and returns raw tool
+    outputs in parallel. Phase 2 will add a separate /api/verify endpoint
+    that runs the agent.
+
+    No file size cap, no content-type validation in Phase 1.
+    TODO Phase 4: cap upload size, validate that the file is actually an image.
+    """
+    t0 = time.monotonic()
+
+    upload_dir = Path(config.agent.workspace) / ".verify_uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    ext = Path(image.filename or "").suffix or ".jpg"
+    image_id = f"{uuid.uuid4().hex}{ext}"
+    image_path = upload_dir / image_id
+
+    contents = await image.read()
+    image_path.write_bytes(contents)
+
+    async def _run(name: str, params: dict):
+        result_str = await tool_registry.execute(name, params)
+        return name, result_str
+
+    pairs = await asyncio.gather(
+        _run("reverse_image_search", {"image_path": str(image_path)}),
+        _run("extract_image_metadata", {"image_path": str(image_path)}),
+        _run("fact_check_lookup", {"query": caption}),
+    )
+
+    elapsed_ms = round((time.monotonic() - t0) * 1000)
+
+    parsed: dict[str, dict] = {}
+    errors: list[dict] = []
+    for name, result_str in pairs:
+        try:
+            result_dict = json.loads(result_str)
+        except json.JSONDecodeError:
+            result_dict = {"error": "tool returned non-JSON", "raw": result_str[:500]}
+        parsed[name] = result_dict
+        if isinstance(result_dict, dict) and "error" in result_dict:
+            errors.append({"tool": name, "error": result_dict["error"]})
+
+    # Spec uses the key "image_metadata" for the metadata tool (not the
+    # registered name "extract_image_metadata"). Map at the response boundary.
+    return JSONResponse({
+        "image_path": str(image_path),
+        "caption": caption,
+        "results": {
+            "reverse_image_search": parsed.get("reverse_image_search"),
+            "image_metadata": parsed.get("extract_image_metadata"),
+            "fact_check_lookup": parsed.get("fact_check_lookup"),
+        },
+        "errors": errors,
+        "elapsed_ms": elapsed_ms,
     })
 
 

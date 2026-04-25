@@ -33,6 +33,14 @@ class ToolsConfig(BaseModel):
     # Policy for approval-requiring tools when there is no human in the loop
     # (HTTP /api/chat, cron jobs). "deny" is the safe default.
     non_interactive_approval_policy: Literal["deny", "auto_approve"] = "deny"
+    # Verification-mode tools registered in the registry but excluded from the
+    # agent's allow list in Phase 1. Reserved for Phase 2 — no code reads this
+    # in Phase 1; the /api/verify/raw endpoint calls these tools directly.
+    verification_tools: list[str] = Field(default_factory=lambda: [
+        "reverse_image_search",
+        "extract_image_metadata",
+        "fact_check_lookup",
+    ])
     shell_blocked_commands: list[str] = Field(default_factory=lambda: [
         "rm -rf /", "mkfs", "dd if=", ":(){ :|:& };:", "> /dev/sda",
         "chmod -R 777 /", "curl | sh", "wget | sh",
@@ -59,6 +67,13 @@ class MemoryConfig(BaseModel):
     embedding_base_url: str = "http://100.127.32.115:1234/v1"
     embedding_model: str = "text-embedding-nomic-embed-text-v1.5"
     top_k: int = 5
+
+
+class VerificationConfig(BaseModel):
+    """API keys for the Phase 1 verification-mode tools."""
+    tineye_api_key: str = ""
+    tineye_api_url: str = "https://api.tineye.com/rest/"
+    google_factcheck_api_key: str = ""
 
 
 class PinchTabConfig(BaseModel):
@@ -97,6 +112,7 @@ class Config(BaseModel):
     reflection: ReflectionConfig = Field(default_factory=ReflectionConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     pinchtab: PinchTabConfig = Field(default_factory=PinchTabConfig)
+    verification: VerificationConfig = Field(default_factory=VerificationConfig)
     openrouter_api_key: str = "ADD_KEY_HERE"
 
 

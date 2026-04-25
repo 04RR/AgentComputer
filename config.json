@@ -53,5 +53,10 @@
     "embedding_base_url": "http://100.127.32.115:1234/v1",
     "embedding_model": "text-embedding-granite-embedding-125m-english",
     "top_k": 5
+  },
+  "verification": {
+    "tineye_api_key": "",
+    "tineye_api_url": "https://api.tineye.com/rest/",
+    "google_factcheck_api_key": ""
   }
 }
