@@ -57,6 +57,8 @@
   "verification": {
     "tineye_api_key": "",
     "tineye_api_url": "https://api.tineye.com/rest/",
-    "google_factcheck_api_key": ""
+    "google_factcheck_api_key": "",
+    "tineye_stub_mode": "off",
+    "_tineye_stub_mode_help": "off = real API; hit = canned misattribution match; miss = empty result. Use hit/miss for Phase 2-4 dev without a TinEye key."
   }
 }

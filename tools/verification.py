@@ -42,6 +42,94 @@ _AI_GENERATOR_HINTS = (
     "flux", "comfyui", "automatic1111", "invokeai", "novelai",
 )
 
+# Stub responses for reverse_image_search. Shape matches the real TinEye
+# contract exactly; "_stub": true at the top level marks them as fake so
+# Phase 2 agent prompts and Phase 3 UI can badge stubbed runs distinctly.
+_STUB_HIT_RESPONSE: dict = {
+    "first_seen_date": "2018-04-02",
+    "first_seen_url": "https://www.reuters.com/article/world-middle-east/syria-photo-2018-04-02",
+    "first_seen_domain": "reuters.com",
+    "total_matches": 47,
+    "top_matches": [
+        {
+            "image_url": "https://www.reuters.com/resizer/photo-2018-04-02.jpg",
+            "domain": "reuters.com",
+            "score": 98.5,
+            "earliest_crawl_date": "2018-04-02",
+            "backlinks": [
+                {
+                    "page_url": "https://www.reuters.com/article/world-middle-east/syria-photo-2018-04-02",
+                    "crawl_date": "2018-04-02",
+                },
+                {
+                    "page_url": "https://www.reuters.com/news/picture/related-coverage-2018-04-03",
+                    "crawl_date": "2018-04-03",
+                },
+            ],
+        },
+        {
+            "image_url": "https://www.dpa.com/photo/2018/dpa-12345.jpg",
+            "domain": "dpa.com",
+            "score": 96.2,
+            "earliest_crawl_date": "2018-04-05",
+            "backlinks": [
+                {
+                    "page_url": "https://www.dpa.com/europe/2018/04/05/article",
+                    "crawl_date": "2018-04-05",
+                },
+            ],
+        },
+        {
+            "image_url": "https://apnews.com/images/2018/photo.jpg",
+            "domain": "apnews.com",
+            "score": 94.8,
+            "earliest_crawl_date": "2018-04-10",
+            "backlinks": [
+                {
+                    "page_url": "https://apnews.com/article/middle-east-news-2018-04-10",
+                    "crawl_date": "2018-04-10",
+                },
+            ],
+        },
+        {
+            "image_url": "https://www.afp.com/news/2018/photo.jpg",
+            "domain": "afp.com",
+            "score": 89.3,
+            "earliest_crawl_date": "2018-09-12",
+            "backlinks": [
+                {
+                    "page_url": "https://www.afp.com/news/2018/09/12/related-event",
+                    "crawl_date": "2018-09-12",
+                },
+            ],
+        },
+        {
+            "image_url": "https://www.gettyimages.com/photos/2019/stock.jpg",
+            "domain": "gettyimages.com",
+            "score": 82.1,
+            "earliest_crawl_date": "2019-03-22",
+            "backlinks": [
+                {
+                    "page_url": "https://www.gettyimages.com/photos/news-event-2019-03-22",
+                    "crawl_date": "2019-03-22",
+                },
+            ],
+        },
+    ],
+    "search_engine": "tineye",
+    "_stub": True,
+}
+
+_STUB_MISS_RESPONSE: dict = {
+    "first_seen_date": None,
+    "first_seen_url": None,
+    "first_seen_domain": None,
+    "total_matches": 0,
+    "top_matches": [],
+    "search_engine": "tineye",
+    "_stub": True,
+}
+
 
 # ─── Tool 1: reverse_image_search (TinEye) ───────────────────────────────
 
@@ -299,6 +387,7 @@ def register_verification_tools(
     """
     api_url = verification_config.tineye_api_url
     tineye_key = verification_config.tineye_api_key
+    tineye_stub_mode = verification_config.tineye_stub_mode
     factcheck_key = verification_config.google_factcheck_api_key
 
     workspace_root = Path(workspace).resolve()
@@ -311,6 +400,12 @@ def register_verification_tools(
 
     # ── reverse_image_search ──
     async def reverse_image_search(image_path: str, max_results: int = 10) -> str:
+        # Stub mode short-circuits before everything else: no api_key needed,
+        # no pytineye import, no image read. The image_path arg is ignored.
+        if tineye_stub_mode == "hit":
+            return json.dumps(_STUB_HIT_RESPONSE)
+        if tineye_stub_mode == "miss":
+            return json.dumps(_STUB_MISS_RESPONSE)
         if not tineye_key:
             return json.dumps({
                 "error": "TinEye API key not configured",

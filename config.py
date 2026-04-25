@@ -70,10 +70,17 @@ class MemoryConfig(BaseModel):
 
 
 class VerificationConfig(BaseModel):
-    """API keys for the Phase 1 verification-mode tools."""
+    """API keys + dev knobs for Phase 1 verification-mode tools.
+
+    tineye_stub_mode:
+      "off"  — call the real TinEye API (requires tineye_api_key)
+      "hit"  — return a canned misattribution-style response (no key needed)
+      "miss" — return an empty result (no key needed)
+    """
     tineye_api_key: str = ""
     tineye_api_url: str = "https://api.tineye.com/rest/"
     google_factcheck_api_key: str = ""
+    tineye_stub_mode: Literal["off", "hit", "miss"] = "off"
 
 
 class PinchTabConfig(BaseModel):
