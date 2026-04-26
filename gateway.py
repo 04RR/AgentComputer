@@ -75,6 +75,12 @@ if config.pinchtab.enabled:
 # so the agent loop can't see them yet. Phase 2 will flip them on for agent use.
 from tools.verification import register_verification_tools
 register_verification_tools(tool_registry, config.agent.workspace, config.verification)
+if config.verification.tineye_stub_mode != "off":
+    logger.warning(
+        f"tineye_stub_mode={config.verification.tineye_stub_mode!r} "
+        f"— reverse_image_search returns canned fixture data, NOT real "
+        f"TinEye results. Set to 'off' for production use."
+    )
 tool_registry.set_approval_requirements(config.agent.tools.require_approval)
 
 # Load existing skills into registry
@@ -474,7 +480,10 @@ async def verify_raw(image: UploadFile = File(...), caption: str = Form(...)):
         return name, result_str
 
     pairs = await asyncio.gather(
-        _run("reverse_image_search", {"image_path": str(image_path)}),
+        _run("reverse_image_search", {
+            "image_path": str(image_path),
+            "caption": caption,
+        }),
         _run("extract_image_metadata", {"image_path": str(image_path)}),
         _run("fact_check_lookup", {"query": caption}),
     )

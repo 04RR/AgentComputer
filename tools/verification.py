@@ -42,10 +42,90 @@ _AI_GENERATOR_HINTS = (
     "flux", "comfyui", "automatic1111", "invokeai", "novelai",
 )
 
-# Stub responses for reverse_image_search. Shape matches the real TinEye
+# Stub fixtures for reverse_image_search. Shape matches the real TinEye
 # contract exactly; "_stub": true at the top level marks them as fake so
 # Phase 2 agent prompts and Phase 3 UI can badge stubbed runs distinctly.
-_STUB_HIT_RESPONSE: dict = {
+#
+# Four cases give Phase 2 reconcile realistic variety in one gateway session:
+#   1. INDIA_CONSISTENT       — recent matches on reputable Indian outlets
+#   2. SYRIA_MISATTRIBUTION   — old (2018) matches, classic recontextualization
+#   3. AMBIGUOUS              — mixed credibility + spread years, inconclusive
+#   4. STUB_MISS              — empty result, no web history (AI-gen / brand new)
+#
+# Dispatch is by caption keywords via _select_stub_fixture below.
+
+_STUB_FIXTURE_INDIA_CONSISTENT: dict = {
+    "first_seen_date": "2026-04-23",
+    "first_seen_url": "https://www.ndtv.com/india-news/mumbai-protest-coverage-2026-04-23",
+    "first_seen_domain": "ndtv.com",
+    "total_matches": 23,
+    "top_matches": [
+        {
+            "image_url": "https://www.ndtv.com/images/2026/protest-mumbai.jpg",
+            "domain": "ndtv.com",
+            "score": 97.8,
+            "earliest_crawl_date": "2026-04-23",
+            "backlinks": [
+                {
+                    "page_url": "https://www.ndtv.com/india-news/mumbai-protest-coverage-2026-04-23",
+                    "crawl_date": "2026-04-23",
+                },
+            ],
+        },
+        {
+            "image_url": "https://www.thehindu.com/photos/2026/protest.jpg",
+            "domain": "thehindu.com",
+            "score": 95.1,
+            "earliest_crawl_date": "2026-04-24",
+            "backlinks": [
+                {
+                    "page_url": "https://www.thehindu.com/news/national/mumbai-protest-update-2026-04-24",
+                    "crawl_date": "2026-04-24",
+                },
+            ],
+        },
+        {
+            "image_url": "https://images.indianexpress.com/2026/04/protest.jpg",
+            "domain": "indianexpress.com",
+            "score": 93.4,
+            "earliest_crawl_date": "2026-04-24",
+            "backlinks": [
+                {
+                    "page_url": "https://indianexpress.com/article/india/mumbai-protest-2026-04-24",
+                    "crawl_date": "2026-04-24",
+                },
+            ],
+        },
+        {
+            "image_url": "https://static.toiimg.com/photo/2026/protest.jpg",
+            "domain": "timesofindia.indiatimes.com",
+            "score": 90.2,
+            "earliest_crawl_date": "2026-04-25",
+            "backlinks": [
+                {
+                    "page_url": "https://timesofindia.indiatimes.com/city/mumbai/protest-2026-04-25",
+                    "crawl_date": "2026-04-25",
+                },
+            ],
+        },
+        {
+            "image_url": "https://www.hindustantimes.com/images/2026/protest.jpg",
+            "domain": "hindustantimes.com",
+            "score": 86.5,
+            "earliest_crawl_date": "2026-04-26",
+            "backlinks": [
+                {
+                    "page_url": "https://www.hindustantimes.com/cities/mumbai-news/protest-update-2026-04-26",
+                    "crawl_date": "2026-04-26",
+                },
+            ],
+        },
+    ],
+    "search_engine": "tineye",
+    "_stub": True,
+}
+
+_STUB_FIXTURE_SYRIA_MISATTRIBUTION: dict = {
     "first_seen_date": "2018-04-02",
     "first_seen_url": "https://www.reuters.com/article/world-middle-east/syria-photo-2018-04-02",
     "first_seen_domain": "reuters.com",
@@ -120,6 +200,65 @@ _STUB_HIT_RESPONSE: dict = {
     "_stub": True,
 }
 
+_STUB_FIXTURE_AMBIGUOUS: dict = {
+    "first_seen_date": "2021-06-12",
+    "first_seen_url": "https://generic-blog.com/2021/06/12/photo-post",
+    "first_seen_domain": "generic-blog.com",
+    "total_matches": 12,
+    "top_matches": [
+        {
+            "image_url": "https://ichef.bbci.co.uk/news/2024/photo.jpg",
+            "domain": "bbc.co.uk",
+            "score": 78.4,
+            "earliest_crawl_date": "2024-01-15",
+            "backlinks": [
+                {
+                    "page_url": "https://www.bbc.co.uk/news/world-2024-01-15",
+                    "crawl_date": "2024-01-15",
+                },
+            ],
+        },
+        {
+            "image_url": "https://www.reuters.com/photos/2022/photo.jpg",
+            "domain": "reuters.com",
+            "score": 75.2,
+            "earliest_crawl_date": "2022-08-30",
+            "backlinks": [
+                {
+                    "page_url": "https://www.reuters.com/news/2022/08/30/feature",
+                    "crawl_date": "2022-08-30",
+                },
+            ],
+        },
+        {
+            "image_url": "https://generic-blog.com/wp-content/uploads/2021/06/photo.jpg",
+            "domain": "generic-blog.com",
+            "score": 71.8,
+            "earliest_crawl_date": "2021-06-12",
+            "backlinks": [
+                {
+                    "page_url": "https://generic-blog.com/2021/06/12/photo-post",
+                    "crawl_date": "2021-06-12",
+                },
+            ],
+        },
+        {
+            "image_url": "https://pbs.twimg.com/media/photo-2024.jpg",
+            "domain": "twitter.com",
+            "score": 68.0,
+            "earliest_crawl_date": "2024-03-22",
+            "backlinks": [
+                {
+                    "page_url": "https://twitter.com/some_user/status/1234567890",
+                    "crawl_date": "2024-03-22",
+                },
+            ],
+        },
+    ],
+    "search_engine": "tineye",
+    "_stub": True,
+}
+
 _STUB_MISS_RESPONSE: dict = {
     "first_seen_date": None,
     "first_seen_url": None,
@@ -129,6 +268,48 @@ _STUB_MISS_RESPONSE: dict = {
     "search_engine": "tineye",
     "_stub": True,
 }
+
+
+def _select_stub_fixture(caption: str) -> dict:
+    """Pick a stub fixture based on caption keywords.
+
+    This is fake data — keywords are matched on the caption text only.
+    The actual image bytes are ignored. Used for Phase 2-4 development
+    without a real TinEye API key.
+
+    Buckets are deliberately narrow; anything that doesn't match falls
+    through to the AMBIGUOUS fixture, representing "real-but-inconclusive"
+    evidence which is the most realistic default for unknown captions.
+    """
+    c = caption.lower()
+
+    # India / Mumbai / Indian outlets → consistent recent match
+    india_keywords = (
+        "mumbai", "delhi", "bangalore", "bengaluru",
+        "chennai", "kolkata", "india", "indian",
+        "ndtv", "modi", "bjp",
+    )
+    if any(kw in c for kw in india_keywords):
+        return _STUB_FIXTURE_INDIA_CONSISTENT
+
+    # Syria / Middle East → misattribution case
+    syria_keywords = (
+        "syria", "syrian", "aleppo", "damascus",
+        "middle east", "gaza", "palestine",
+    )
+    if any(kw in c for kw in syria_keywords):
+        return _STUB_FIXTURE_SYRIA_MISATTRIBUTION
+
+    # AI-related claims → no web history
+    ai_keywords = (
+        "ai generated", "ai-generated", "stable diffusion",
+        "midjourney", "dall-e", "synthetic",
+    )
+    if any(kw in c for kw in ai_keywords):
+        return _STUB_MISS_RESPONSE
+
+    # Default → ambiguous (mixed evidence)
+    return _STUB_FIXTURE_AMBIGUOUS
 
 
 # ─── Tool 1: reverse_image_search (TinEye) ───────────────────────────────
@@ -399,11 +580,17 @@ def register_verification_tools(
         return path.resolve()
 
     # ── reverse_image_search ──
-    async def reverse_image_search(image_path: str, max_results: int = 10) -> str:
+    async def reverse_image_search(
+        image_path: str,
+        caption: str = "",
+        max_results: int = 10,
+    ) -> str:
         # Stub mode short-circuits before everything else: no api_key needed,
-        # no pytineye import, no image read. The image_path arg is ignored.
+        # no pytineye import, no image read. In "hit" mode the caption is used
+        # by _select_stub_fixture to pick a fixture; the image_path is ignored.
+        # The real TinEye path (stub_mode == "off") ignores the caption entirely.
         if tineye_stub_mode == "hit":
-            return json.dumps(_STUB_HIT_RESPONSE)
+            return json.dumps(_select_stub_fixture(caption))
         if tineye_stub_mode == "miss":
             return json.dumps(_STUB_MISS_RESPONSE)
         if not tineye_key:
