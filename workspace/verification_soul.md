@@ -93,6 +93,54 @@ ends. Fix any errors and re-validate.
   )
 ```
 
+**Each tool's `tool_args` keys MUST match that tool's actual parameter
+names.** Don't generalize from one example to another — the parameter
+shapes differ between tools.
+
+```
+fact_check_lookup uses `query`, NOT `caption`:
+
+  manage_tasks(
+      action="create",
+      title="Fact-check the caption claim",
+      node_type="tool",
+      config={
+          "tool_name": "fact_check_lookup",
+          "tool_args": {
+              "query": "<the caption text from your initial message>",
+          },
+      },
+  )
+
+extract_caption_claims also uses `caption` (it decomposes captions):
+
+  manage_tasks(
+      action="create",
+      title="Extract caption claims",
+      node_type="tool",
+      config={
+          "tool_name": "extract_caption_claims",
+          "tool_args": {
+              "caption": "<the caption text from your initial message>",
+          },
+      },
+  )
+
+extract_image_metadata takes only `image_path`:
+
+  manage_tasks(
+      action="create",
+      title="Extract EXIF metadata",
+      node_type="tool",
+      config={
+          "tool_name": "extract_image_metadata",
+          "tool_args": {
+              "image_path": "<the absolute image path from your initial message>",
+          },
+      },
+  )
+```
+
 **Reconcile node** — also a tool node. Takes claims + the three gathered
 evidence outputs as templated `tool_args`. Reference the gather output
 keys (which are `task_<id>` strings) and the original claims task:
